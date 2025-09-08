@@ -1,0 +1,842 @@
+package graphtheory;
+
+/**
+ *
+ * @author mk
+ */
+import javax.swing.*;
+import java.awt.*;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
+import java.awt.event.MouseEvent;
+import java.awt.event.MouseListener;
+import java.awt.event.MouseMotionListener;
+import java.awt.Toolkit;
+import java.awt.event.KeyEvent;
+import java.util.Vector;
+import java.util.Stack;
+
+public class Canvas {
+
+    public JFrame frame;
+    private JMenuBar menuBar;
+    private CanvasPane canvas;
+    private Graphics2D graphic;
+    private Color backgroundColour;
+    private Image canvasImage,  canvasImage2;
+    private int selectedTool;
+    private int selectedWindow;
+    private Dimension screenSize;
+    public int width,  height;
+    private int clickedVertexIndex;
+    private Color selectedColor;
+    private FileManager fileManager = new FileManager();
+    private boolean directionalityEnabled = false;
+    private boolean showInstructionsOverlay = false;
+    private static final int TOOLBAR_BUTTON_WIDTH = 200;
+    private JPanel propertiesPanel;
+
+    /////////////
+    private Vector<Vertex> vertexList;
+    private Vector<Edge> edgeList;
+    private GraphProperties gP = new GraphProperties();
+    private Stack<GraphState> undoStack = new Stack<>();
+    private Stack<GraphState> redoStack = new Stack<>();
+    /////////////
+
+    public Canvas(String title, int width, int height, Color bgColour) {
+        frame = new JFrame();
+        frame.setTitle(title);
+        frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        frame.setResizable(false);
+        canvas = new CanvasPane();
+        InputListener inputListener = new InputListener();
+        canvas.addMouseListener(inputListener);
+        canvas.addMouseMotionListener(inputListener);
+        // Content pane will be set later with a root BorderLayout containing toolbar (WEST), canvas (CENTER), and properties (EAST)
+
+        this.width = width;
+        this.height = height;
+        canvas.setPreferredSize(new Dimension(width, height));
+
+        //events
+        // Set up a locked (non-floatable) vertical toolbar inside a bordered pane on the left
+        JToolBar toolBar = new JToolBar(JToolBar.VERTICAL);
+        toolBar.setFloatable(false);
+        toolBar.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+
+        // Instructions toggle button at the top of the toolbar
+        JButton instructionsButton = new JButton("Instructions");
+        instructionsButton.setToolTipText("Show instructions for the selected tool (toggles overlay)");
+        instructionsButton.setPreferredSize(new Dimension(TOOLBAR_BUTTON_WIDTH, 32));
+        instructionsButton.setMaximumSize(new Dimension(TOOLBAR_BUTTON_WIDTH, 32));
+        instructionsButton.setMinimumSize(new Dimension(TOOLBAR_BUTTON_WIDTH, 32));
+        instructionsButton.setHorizontalAlignment(SwingConstants.LEFT);
+        instructionsButton.addActionListener(ev -> { showInstructionsOverlay = !showInstructionsOverlay; refresh(); });
+        toolBar.add(instructionsButton);
+        toolBar.addSeparator();
+
+        Object[][] toolData = {
+            {"Add Vertex", "Ctrl+A", "Click to add a new vertex."},
+            {"Add Edges", "Ctrl+E", "Drag between nodes to connect. (Double-click on the selected node for a self-loop)"},
+            {"Grab Tool", "Ctrl+G", "Click and drag to move vertices."},
+            {"Remove Tool", null, "(Double-click on the selected node/edge) to remove it."},
+            {"Set Node Color", null, "Select a color, then click a node to apply it."},
+            {"Set Edge Color", null, "Select a color, then click an edge to apply it."},
+            {"Enable Directionality", null, "Toggle directed edges on or off."},
+            {"Invert Edge Direction", null, "Click a directed edge to reverse its direction."},
+            {"Auto Arrange Vertices", null, "Arrange vertices in a circle."},
+            {"Undo", "Ctrl+Z", "Undo the last action."},
+            {"Redo", "Ctrl+Y", "Redo the last undone action."},
+            {"Remove All", null, "Clear the canvas, removing all vertices and edges."}
+        };
+
+        for (Object[] tool : toolData) {
+            String name = (String) tool[0];
+            String shortcut = (String) tool[1];
+            String tooltip = (String) tool[2];
+
+            String buttonText = name + (shortcut != null ? " (" + shortcut + ")" : "");
+            JButton button = new JButton(buttonText);
+            button.setActionCommand(name); // Use the base name for the action command
+            button.setToolTipText(tooltip);
+            button.setPreferredSize(new Dimension(TOOLBAR_BUTTON_WIDTH, 32));
+            button.setMaximumSize(new Dimension(TOOLBAR_BUTTON_WIDTH, 32));
+            button.setMinimumSize(new Dimension(TOOLBAR_BUTTON_WIDTH, 32));
+            button.setHorizontalAlignment(SwingConstants.LEFT);
+            button.addActionListener(new MenuListener());
+            toolBar.add(button);
+        }
+
+        JPanel toolPanel = new JPanel(new BorderLayout());
+        toolPanel.setBorder(BorderFactory.createLineBorder(Color.BLACK, 2));
+        toolPanel.add(toolBar, BorderLayout.CENTER);
+        toolPanel.setPreferredSize(new Dimension(TOOLBAR_BUTTON_WIDTH + 20, height));
+        // Do not add directly to frame; we'll assemble a root panel below
+
+        // Set up the properties panel (EAST)
+        propertiesPanel = new JPanel();
+        propertiesPanel.setLayout(new BoxLayout(propertiesPanel, BoxLayout.Y_AXIS));
+        propertiesPanel.setBorder(BorderFactory.createTitledBorder("Graph Properties"));
+
+        // Root layout to separate panes: tools (WEST), work canvas (CENTER), properties (EAST)
+        JPanel root = new JPanel(new BorderLayout());
+        root.add(toolPanel, BorderLayout.WEST);
+        root.add(canvas, BorderLayout.CENTER);
+        root.add(propertiesPanel, BorderLayout.EAST);
+        frame.setContentPane(root);
+
+        menuBar = new JMenuBar();
+        JMenu menuOptions1 = new JMenu("File");
+        JMenu menuOptions3 = new JMenu("Window");
+
+        JMenuItem item = new JMenuItem("Open File");
+        item.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_O, KeyEvent.CTRL_DOWN_MASK));
+        item.addActionListener(new MenuListener());
+        menuOptions1.add(item);
+        item = new JMenuItem("Save to File");
+        item.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_S, KeyEvent.CTRL_DOWN_MASK));
+        item.addActionListener(new MenuListener());
+        menuOptions1.add(item);
+
+        item = new JMenuItem("Graph");
+        item.addActionListener(new MenuListener());
+        menuOptions3.add(item);
+        item = new JMenuItem("Properties");
+        item.addActionListener(new MenuListener());
+        menuOptions3.add(item);
+
+        menuBar.add(menuOptions1);
+        menuBar.add(menuOptions3);
+
+        frame.setJMenuBar(menuBar);
+
+        backgroundColour = bgColour;
+
+        screenSize = Toolkit.getDefaultToolkit().getScreenSize();
+        frame.setBounds(screenSize.width / 2 - width / 2, screenSize.height / 2 - height / 2, width, height);
+        frame.pack();
+        setVisible(true);
+
+        vertexList = new Vector<Vertex>();
+        edgeList = new Vector<Edge>();
+
+    }
+
+    class InputListener implements MouseListener, MouseMotionListener {
+
+        @Override
+        public void mouseClicked(MouseEvent e) {
+            saveState();
+
+            if (selectedWindow == 0) {
+                if (e.getClickCount() == 2 && selectedTool == 2) { // Double-click for self-loop
+                    for (Vertex v : vertexList) {
+                        if (v.hasIntersection(e.getX(), e.getY())) {
+                            Edge edge = new Edge(v, v);
+                            edge.isDirected = directionalityEnabled;
+                            edgeList.add(edge);
+                            v.addVertex(v);
+                            break;
+                        }
+                    }
+                } else {
+                    switch (selectedTool) {
+                        case 1: {
+                            Vertex v = new Vertex("" + vertexList.size(), e.getX(), e.getY());
+                            vertexList.add(v);
+                            v.draw(graphic);
+                            break;
+                        }
+                    case 4: { // Remove Tool
+                        if (e.getClickCount() == 1) {
+                            // Single-click: select vertex or edge under cursor
+                            boolean selectedSomething = false;
+                            for (Vertex v : vertexList) {
+                                if (v.hasIntersection(e.getX(), e.getY())) {
+                                    v.wasClicked = true;
+                                    selectedSomething = true;
+                                } else {
+                                    v.wasClicked = false;
+                                }
+                            }
+                            for (Edge edge : edgeList) {
+                                if (edge.hasIntersection(e.getX(), e.getY())) {
+                                    edge.wasClicked = true;
+                                    selectedSomething = true;
+                                } else {
+                                    edge.wasClicked = false;
+                                }
+                            }
+                            if (selectedSomething) refresh();
+                        } else if (e.getClickCount() == 2) {
+                            // Double-click: if selected vertex/edge is under cursor, remove it
+                            Vertex selectedVertex = null;
+                            for (Vertex v : vertexList) {
+                                if (v.wasClicked && v.hasIntersection(e.getX(), e.getY())) {
+                                    selectedVertex = v;
+                                    break;
+                                }
+                            }
+                            if (selectedVertex != null) {
+                                Vector<Edge> edgesToRemove = new Vector<>();
+                                for (Edge edge : edgeList) {
+                                    if (edge.vertex1 == selectedVertex || edge.vertex2 == selectedVertex) {
+                                        edgesToRemove.add(edge);
+                                    }
+                                }
+                                edgeList.removeAll(edgesToRemove);
+                                for (Vertex v : vertexList) {
+                                    v.connectedVertices.remove(selectedVertex);
+                                }
+                                vertexList.remove(selectedVertex);
+                            } else {
+                                Edge selectedEdge = null;
+                                for (Edge edge : edgeList) {
+                                    if (edge.wasClicked && edge.hasIntersection(e.getX(), e.getY())) {
+                                        selectedEdge = edge;
+                                        break;
+                                    }
+                                }
+                                if (selectedEdge != null) {
+                                    selectedEdge.vertex1.connectedVertices.remove(selectedEdge.vertex2);
+                                    if (selectedEdge.vertex1 != selectedEdge.vertex2) {
+                                        selectedEdge.vertex2.connectedVertices.remove(selectedEdge.vertex1);
+                                    }
+                                    edgeList.remove(selectedEdge);
+                                }
+                            }
+                            // Clear any selection
+                            for (Vertex v : vertexList) v.wasClicked = false;
+                            for (Edge edge : edgeList) edge.wasClicked = false;
+                        }
+                        break;
+                    }
+                    case 5: { // Set Node Color
+                        if (selectedColor != null) {
+                            for (Vertex v : vertexList) {
+                                if (v.hasIntersection(e.getX(), e.getY())) {
+                                    v.color = selectedColor;
+                                    break;
+                                }
+                            }
+                        }
+                        break;
+                    }
+                    case 6: { // Set Edge Color
+                        if (selectedColor != null) {
+                            for (Edge edge : edgeList) {
+                                if (edge.hasIntersection(e.getX(), e.getY())) {
+                                    edge.color = selectedColor;
+                                    break;
+                                }
+                            }
+                        }
+                        break;
+                    }
+                    case 7: { // Invert Edge Direction
+                        if (directionalityEnabled) {
+                            for (Edge edge : edgeList) {
+                                if (edge.hasIntersection(e.getX(), e.getY())) {
+                                    // Swap the vertices to invert the direction
+                                    Vertex temp = edge.vertex1;
+                                    edge.vertex1 = edge.vertex2;
+                                    edge.vertex2 = temp;
+                                    break;
+                                }
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+            //refresh();
+            }
+
+
+        }
+
+        @Override
+        public void mouseEntered(MouseEvent e) {
+        }
+
+        @Override
+        public void mouseExited(MouseEvent e) {
+        }
+
+        @Override
+        public void mousePressed(MouseEvent e) {
+            if (selectedWindow == 0 && vertexList.size() > 0) {
+                switch (selectedTool) {
+                    case 2: {
+                        for (Vertex v : vertexList) {
+                            if (v.hasIntersection(e.getX(), e.getY())) {
+                                v.wasClicked = true;
+                                clickedVertexIndex = vertexList.indexOf(v);
+                            } else {
+                                v.wasClicked = false;
+                            }
+                        }
+                        break;
+                    }
+                    case 3: {
+
+                        for (Edge d : edgeList) {
+                            if (d.hasIntersection(e.getX(), e.getY())) {
+                                d.wasClicked = true;
+                            } else {
+                                d.wasClicked = false;
+                            }
+                        }
+                        for (Vertex v : vertexList) {
+                            if (v.hasIntersection(e.getX(), e.getY())) {
+                                v.wasClicked = true;
+                                clickedVertexIndex = vertexList.indexOf(v);
+                            } else {
+                                v.wasClicked = false;
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+
+        }
+
+        @Override
+        public void mouseReleased(MouseEvent e) {
+            saveState();
+            if (selectedWindow == 0 && vertexList.size() > 0) {
+                switch (selectedTool) {
+                    case 2: {
+                        Vertex parentV = vertexList.get(clickedVertexIndex);
+                        for (Vertex v : vertexList) {
+                            if (v.hasIntersection(e.getX(), e.getY())) {
+                                if (!v.connectedToVertex(parentV) && v != parentV) { // Edge to another vertex
+                                    Edge edge = new Edge(v, parentV);
+                                    edge.isDirected = directionalityEnabled;
+                                    v.addVertex(parentV);
+                                    parentV.addVertex(v);
+                                    edgeList.add(edge);
+                                    break;
+                                }
+                            }
+                        }
+
+                        for (Vertex v : vertexList) {
+                            v.wasClicked = false;
+                        }
+                        break;
+                    }
+                    case 3: {
+                        vertexList.get(clickedVertexIndex).wasClicked = false;
+                        break;
+                    }
+                }
+            }
+            erase();
+            refresh();
+        }
+
+        @Override
+        public void mouseDragged(MouseEvent e) {
+
+            if (selectedWindow == 0 && vertexList.size() > 0) {
+                erase();
+                switch (selectedTool) {
+                    case 2: {
+                        graphic.setColor(Color.RED);
+                        drawLine(vertexList.get(clickedVertexIndex).location.x, vertexList.get(clickedVertexIndex).location.y, e.getX(), e.getY());
+                        break;
+
+                    }
+                    case 3: {
+                        if (vertexList.get(clickedVertexIndex).wasClicked) {
+                            vertexList.get(clickedVertexIndex).location.x = e.getX();
+                            vertexList.get(clickedVertexIndex).location.y = e.getY();
+                        }
+                        break;
+                    }
+                }
+                refresh();
+            }
+
+        }
+
+        @Override
+        public void mouseMoved(MouseEvent e) {
+            if (selectedWindow == 0) {
+                for (Edge d : edgeList) {
+                    if (d.hasIntersection(e.getX(), e.getY())) {
+                        d.wasFocused = true;
+                    } else {
+                        d.wasFocused = false;
+                    }
+                }
+                for (Vertex v : vertexList) {
+                    if (v.hasIntersection(e.getX(), e.getY())) {
+                        v.wasFocused = true;
+                    } else {
+                        v.wasFocused = false;
+                    }
+                }
+                refresh();
+            }
+
+        }
+    }
+
+    class MenuListener implements ActionListener {
+
+        public void actionPerformed(ActionEvent e) {
+            String command = e.getActionCommand();
+            if (command.equals("Add Vertex")) {
+                selectedTool = 1;
+            } else if (command.equals("Add Edges")) {
+                selectedTool = 2;
+            } else if (command.equals("Grab Tool")) {
+                selectedTool = 3;
+            } else if (command.equals("Remove Tool")) {
+                selectedTool = 4;
+            } else if (command.equals("Set Node Color")) {
+                selectedTool = 5;
+                selectedColor = JColorChooser.showDialog(frame, "Choose Node Color", Color.BLACK);
+            } else if (command.equals("Set Edge Color")) {
+                selectedTool = 6;
+                selectedColor = JColorChooser.showDialog(frame, "Choose Edge Color", Color.BLACK);
+            } else if (command.equals("Enable Directionality")) {
+                directionalityEnabled = !directionalityEnabled;
+                // Apply to all existing edges
+                for (Edge edge : edgeList) {
+                    edge.isDirected = directionalityEnabled;
+                }
+                refresh();
+            } else if (command.equals("Invert Edge Direction")) {
+                selectedTool = 7;
+            } else if (command.equals("Undo")) {
+                undo();
+            } else if (command.equals("Redo")) {
+                redo();
+            } else if (command.equals("Auto Arrange Vertices")) {
+                saveState();
+                arrangeVertices();
+                erase();
+            } else if (command.equals("Remove All")) {
+                saveState();
+                edgeList.removeAllElements();
+                vertexList.removeAllElements();
+                clickedVertexIndex = 0;
+                erase();
+            } else if (command.equals("Open File")) {
+                int returnValue = fileManager.jF.showOpenDialog(frame);
+                if (returnValue == JFileChooser.APPROVE_OPTION) {
+                    loadFile(fileManager.loadFile(fileManager.jF.getSelectedFile()));
+                    System.out.println(fileManager.jF.getSelectedFile());
+                    selectedWindow=0;
+                }
+            } else if (command.equals("Save to File")) {
+                int returnValue = fileManager.jF.showSaveDialog(frame);
+                if (returnValue == JFileChooser.APPROVE_OPTION) {
+                    fileManager.saveFile(vertexList,fileManager.jF.getSelectedFile());
+                    System.out.println(fileManager.jF.getSelectedFile());
+                }
+            } else if (command.equals("Graph")) {
+                selectedWindow = 0;
+                erase();
+            } else if (command.equals("Properties")) {
+                selectedWindow = 1;
+                if (vertexList.size() > 0) {
+                    //adjacency list
+                    int[][] matrix = gP.generateAdjacencyMatrix(vertexList, edgeList);
+
+                    //connectivity
+                    Vector<Vertex> tempList = gP.vertexConnectivity(vertexList);
+                    for (Vertex v : tempList) {
+                        vertexList.get(vertexList.indexOf(v)).wasClicked = true;
+                    }
+                    reloadVertexConnections(matrix, vertexList);
+
+                    //distance
+                    gP.generateDistanceMatrix(vertexList);
+
+                    //VD paths
+                    gP.displayContainers(vertexList);
+                //gP.drawNWideDiameter();
+                }
+                erase();
+            } else if (command.equals("Instructions")) {
+                showInstructions();
+            }
+
+            refresh();
+        }
+    }
+
+    private void arrangeVertices() {
+        double deg2rad = Math.PI / 180;
+        double radius = height / 5;
+        double centerX = width / 2;
+        double centerY = height / 2;
+        int interval = 360 / vertexList.size();
+
+
+        for (int i = 0; i < vertexList.size(); i++) {
+            double degInRad = i * deg2rad * interval;
+            double x = centerX + (Math.cos(degInRad) * radius);
+            double y = centerY + (Math.sin(degInRad) * radius);
+            int X = (int) x;
+            int Y = (int) y;
+            vertexList.get(i).location.x = X;
+            vertexList.get(i).location.y = Y;
+        }
+
+    }
+
+    private void reloadVertexConnections(int[][] aMatrix, Vector<Vertex> vList) {
+        for (Vertex v : vList) {
+            v.connectedVertices.clear();
+        }
+
+        for (int i = 0; i < aMatrix.length; i++) {
+            for (int j = 0; j < aMatrix.length; j++) {
+                if (aMatrix[i][j] == 1) {
+                    vList.get(i).addVertex(vList.get(j));
+                }
+            }
+        }
+
+    }
+
+    @SuppressWarnings("unchecked")
+    private void loadFile(Vector<Vector<?>> File) {
+        vertexList = (Vector<Vertex>) File.firstElement();
+        edgeList = (Vector<Edge>) File.lastElement();
+        erase();
+    }
+
+    private void saveState() {
+        // To prevent saving states unnecessarily, we could add a check here
+        // to see if the graph has actually changed since the last save.
+        // For now, we'll clear the redo stack and push the new state.
+        redoStack.clear();
+        if (undoStack.isEmpty() || !isSameState(undoStack.peek(), vertexList, edgeList)) {
+            undoStack.push(new GraphState(vertexList, edgeList));
+        }
+    }
+
+    private boolean isSameState(GraphState state, Vector<Vertex> currentVertices, Vector<Edge> currentEdges) {
+        if (state.vertexList.size() != currentVertices.size() || state.edgeList.size() != currentEdges.size()) {
+            return false;
+        }
+        // This is a simplified check. A more thorough check would compare vertex positions, colors, and connections.
+        return true;
+    }
+
+    private void undo() {
+        if (!undoStack.isEmpty()) {
+            redoStack.push(new GraphState(vertexList, edgeList));
+            GraphState previousState = undoStack.pop();
+            this.vertexList = previousState.vertexList;
+            this.edgeList = previousState.edgeList;
+            refresh();
+        }
+    }
+
+    private void redo() {
+        if (!redoStack.isEmpty()) {
+            undoStack.push(new GraphState(vertexList, edgeList));
+            GraphState nextState = redoStack.pop();
+            this.vertexList = nextState.vertexList;
+            this.edgeList = nextState.edgeList;
+            refresh();
+        }
+    }
+
+    public void refresh() {
+        for (Edge e : edgeList) {
+            e.draw(graphic);
+        }
+        for (Vertex v : vertexList) {
+            v.draw(graphic);
+        }
+
+        // Update properties panel
+        propertiesPanel.removeAll();
+
+        // Counts
+        propertiesPanel.add(new JLabel("Vertices: " + vertexList.size()));
+        propertiesPanel.add(new JLabel("Edges: " + edgeList.size()));
+
+        // Graph Density
+        double density = 0;
+        if (vertexList.size() > 1) {
+            density = (2.0 * edgeList.size()) / (vertexList.size() * (vertexList.size() - 1));
+        }
+        propertiesPanel.add(new JLabel(String.format("Density: %.2f", density)));
+
+        // Node Degrees
+        Vertex selectedVertex = null;
+        for (Vertex v : vertexList) {
+            if (v.wasClicked) {
+                selectedVertex = v;
+                break;
+            }
+        }
+
+        if (selectedVertex != null) {
+            propertiesPanel.add(new JLabel("Node " + selectedVertex.name + " Degree: " + selectedVertex.getDegree()));
+        } else {
+            propertiesPanel.add(new JLabel("Node Degrees (All):"));
+            for (Vertex v : vertexList) {
+                propertiesPanel.add(new JLabel("  " + v.name + ": " + v.getDegree()));
+            }
+        }
+
+        propertiesPanel.revalidate();
+        propertiesPanel.repaint();
+
+        canvas.repaint();
+    }
+
+    public void setVisible(boolean visible) {
+        if (graphic == null) {
+            Dimension size = canvas.getSize();
+            canvasImage = canvas.createImage(size.width, size.height);
+            canvasImage2 = canvas.createImage(size.width, size.height);
+            graphic = (Graphics2D) canvasImage.getGraphics();
+            graphic.setColor(backgroundColour);
+            graphic.fillRect(0, 0, size.width, size.height);
+            graphic.setColor(Color.black);
+        }
+        frame.setVisible(visible);
+    }
+
+    public boolean isVisible() {
+        return frame.isVisible();
+    }
+
+    public void erase() {
+        graphic.clearRect(0, 0, width, height);
+    }
+
+    public void erase(int x, int y, int x1, int y2) {
+        graphic.clearRect(x, y, x1, y2);
+    }
+
+    public void drawString(String text, int x, int y, float size) {
+        Font orig = graphic.getFont();
+        graphic.setFont(graphic.getFont().deriveFont(1, size));
+        graphic.drawString(text, x, y);
+        graphic.setFont(orig);
+    }
+
+    public void drawLine(int x1, int y1, int x2, int y2) {
+        graphic.drawLine(x1, y1, x2, y2);
+    }
+
+    private String getInstructionForSelectedTool() {
+        switch (selectedTool) {
+            case 1:
+                return "Add Vertex: Click on the canvas to add a vertex.";
+            case 2:
+                return "Add Edges: Drag between nodes to connect; (double-click on the selected node) for a self-loop.";
+            case 3:
+                return "Grab Tool: Click and drag a node to move it.";
+            case 4:
+                return "Remove Tool: Single-click to select a node/edge; (double-click on the selected node/edge) to delete it.";
+            case 5:
+                return "Set Node Color: Choose a color, then click a node to apply it.";
+            case 6:
+                return "Set Edge Color: Choose a color, then click an edge to apply it.";
+            case 7:
+                return "Invert Edge Direction: Click a directed edge to reverse direction (when directionality is enabled).";
+            default:
+                return "Select a tool from the left toolbar to see instructions.";
+        }
+    }
+
+    // Draw a full-width instruction area at the bottom of the work canvas with word wrapping
+    private void drawInstructionsOverlay(Graphics g) {
+        if (!showInstructionsOverlay) return;
+
+        String text = getInstructionForSelectedTool();
+        if (text == null || text.isEmpty()) return;
+
+        int pad = 10;
+        int canvasW = canvas.getWidth();
+        int canvasH = canvas.getHeight();
+        FontMetrics fm = g.getFontMetrics();
+        int maxWidth = Math.max(50, canvasW - pad * 2);
+
+        java.util.List<String> lines = wrapText(text, fm, maxWidth);
+        int lineHeight = fm.getHeight();
+        int blockHeight = lineHeight * lines.size() + pad * 2;
+        int yTop = canvasH - blockHeight; // stick to bottom
+
+        // Background bar (opaque white)
+        Color prev = g.getColor();
+        g.setColor(Color.WHITE);
+        g.fillRect(0, yTop, canvasW, blockHeight);
+        g.setColor(Color.BLACK);
+
+        // Draw lines
+        int y = yTop + pad + fm.getAscent();
+        for (String line : lines) {
+            g.drawString(line, pad, y);
+            y += lineHeight;
+        }
+        g.setColor(prev);
+    }
+
+    // Simple word-wrap using FontMetrics
+    private java.util.List<String> wrapText(String text, FontMetrics fm, int maxWidth) {
+        java.util.List<String> lines = new java.util.ArrayList<>();
+        String[] words = text.split("\\s+");
+        StringBuilder current = new StringBuilder();
+        for (String w : words) {
+            String candidate = current.length() == 0 ? w : current + " " + w;
+            if (fm.stringWidth(candidate) <= maxWidth) {
+                current.setLength(0);
+                current.append(candidate);
+            } else {
+                if (current.length() > 0) lines.add(current.toString());
+                // If a single word is too long, hard-cut it
+                if (fm.stringWidth(w) > maxWidth) {
+                    String cut = w;
+                    String part = "";
+                    for (int i = 0; i < cut.length(); i++) {
+                        String tryPart = part + cut.charAt(i);
+                        if (fm.stringWidth(tryPart) > maxWidth) {
+                            if (!part.isEmpty()) lines.add(part);
+                            part = String.valueOf(cut.charAt(i));
+                        } else {
+                            part = tryPart;
+                        }
+                    }
+                    current.setLength(0);
+                    current.append(part);
+                } else {
+                    current.setLength(0);
+                    current.append(w);
+                }
+            }
+        }
+        if (current.length() > 0) lines.add(current.toString());
+        return lines;
+    }
+
+    private class CanvasPane extends JPanel {
+
+        public void paint(Graphics g) {
+            switch (selectedWindow) {
+                case 0: {   //graph window
+                    // Draw the base canvas image first (work area)
+                    g.drawImage(canvasImage, 0, 0, null); // layer 1
+                    g.setColor(Color.black);
+
+                    // Full-width, bottom instructions with wrapping inside the work canvas
+                    drawInstructionsOverlay(g);
+                    break;
+                }
+                case 1: {   //properties window
+                    canvasImage2.getGraphics().clearRect(0, 0, width, height); //clear
+                    gP.drawAdjacencyMatrix(canvasImage2.getGraphics(), vertexList, width / 2 + 50, 50);//draw adjacency matrix
+                    gP.drawDistanceMatrix(canvasImage2.getGraphics(), vertexList, width / 2 + 50, height / 2 + 50);//draw distance matrix
+                    g.drawImage(canvasImage2, 0, 0, null); //layer 1
+                    drawString("Graph disconnects when nodes in color red are removed.", 100, height - 30, 20);
+                    g.drawString("See output console for Diameter of Graph", 100, height / 2 + 50);
+                    g.drawImage(canvasImage.getScaledInstance(width / 2, height / 2, Image.SCALE_SMOOTH), 0, 0, null); //layer 1
+                    g.draw3DRect(0, 0, width / 2, height / 2, true);
+                    g.setColor(Color.black);
+
+                    break;
+                }
+            }
+
+        }
+    }
+
+    private void showInstructions() {
+        String instructions = "";
+        switch (selectedTool) {
+            case 1:
+                instructions = "Add Vertex: Click to add a new vertex.";
+                break;
+            case 2:
+                instructions = "Add Edges: Drag between nodes to connect. Double-click a node for a self-loop.";
+                break;
+            case 3:
+                instructions = "Grab Tool: Click and drag to move vertices.";
+                break;
+            case 4:
+                instructions = "Remove Tool: Double-click a node or edge to remove it.";
+                break;
+            case 5:
+                instructions = "Set Node Color: Select a color, then click a node to apply it.";
+                break;
+            case 6:
+                instructions = "Set Edge Color: Select a color, then click an edge to apply it.";
+                break;
+            case 7:
+                instructions = "Enable Directionality: Toggle directed edges on or off.";
+                break;
+            case 8:
+                instructions = "Invert Edge Direction: Click a directed edge to reverse its direction.";
+                break;
+            case 9:
+                instructions = "Auto Arrange Vertices: Arrange vertices in a circle.";
+                break;
+            case 10:
+                instructions = "Undo: Undo the last action.";
+                break;
+            case 11:
+                instructions = "Redo: Redo the last undone action.";
+                break;
+            case 12:
+                instructions = "Remove All: Clear the canvas, removing all vertices and edges.";
+                break;
+        }
+        // Display instructions at the bottom right
+        drawString(instructions, width - 300, height - 20, 12);
+    }
+}
