@@ -6,6 +6,7 @@ package graphtheory;
 
 import java.awt.Color;
 import java.awt.Graphics;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Vector;
@@ -57,6 +58,58 @@ public class GraphProperties {
                 distanceMatrix[vList.indexOf(vp.vertex2)][vList.indexOf(vp.vertex1)] = shortestDistance;
             }
         }
+        return distanceMatrix;
+    }
+
+    // New: weighted, direction-aware shortest paths using Dijkstra from each source
+    @SuppressWarnings("unchecked")
+    public int[][] generateDistanceMatrixWeighted(Vector<Vertex> vList, Vector<Edge> eList) {
+        int n = vList.size();
+        distanceMatrix = new int[n][n];
+
+        // Build adjacency lists with weights. If an edge is undirected (isDirected == false), add both directions.
+        Vector<int[]>[] adj = new Vector[n]; // each int[] = {to, weight}
+        for (int i = 0; i < n; i++) adj[i] = new Vector<>();
+        for (Edge e : eList) {
+            int u = vList.indexOf(e.vertex1);
+            int v = vList.indexOf(e.vertex2);
+            if (u < 0 || v < 0) continue;
+            int w = Math.max(0, e.weight);
+            adj[u].add(new int[]{v, w});
+            if (!e.isDirected) {
+                adj[v].add(new int[]{u, w});
+            }
+        }
+
+        final int INF = 1_000_000_000;
+        for (int s = 0; s < n; s++) {
+            int[] dist = new int[n];
+            boolean[] used = new boolean[n];
+            Arrays.fill(dist, INF);
+            dist[s] = 0;
+
+            for (int iter = 0; iter < n; iter++) {
+                int u = -1;
+                int best = INF;
+                for (int i = 0; i < n; i++) {
+                    if (!used[i] && dist[i] < best) { best = dist[i]; u = i; }
+                }
+                if (u == -1) break; // remaining unreachable
+                used[u] = true;
+                for (int[] pr : adj[u]) {
+                    int v = pr[0];
+                    int w = pr[1];
+                    if (dist[u] + w < dist[v]) {
+                        dist[v] = dist[u] + w;
+                    }
+                }
+            }
+
+            for (int t = 0; t < n; t++) {
+                distanceMatrix[s][t] = (s == t || dist[t] == INF) ? 0 : dist[t];
+            }
+        }
+
         return distanceMatrix;
     }
 

@@ -16,6 +16,8 @@ import java.awt.Toolkit;
 import java.awt.event.KeyEvent;
 import java.util.Vector;
 import java.util.Stack;
+import java.awt.event.ComponentAdapter;
+import java.awt.event.ComponentEvent;
 
 public class Canvas {
 
@@ -50,11 +52,25 @@ public class Canvas {
         frame = new JFrame();
         frame.setTitle(title);
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        frame.setResizable(false);
+        frame.setResizable(true);
         canvas = new CanvasPane();
         InputListener inputListener = new InputListener();
         canvas.addMouseListener(inputListener);
         canvas.addMouseMotionListener(inputListener);
+        canvas.addComponentListener(new ComponentAdapter() {
+            @Override public void componentResized(ComponentEvent e) {
+                Dimension size = canvas.getSize();
+                Canvas.this.width = size.width;
+                Canvas.this.height = size.height;
+                canvasImage = canvas.createImage(size.width, size.height);
+                canvasImage2 = canvas.createImage(size.width, size.height);
+                graphic = (Graphics2D) canvasImage.getGraphics();
+                graphic.setColor(backgroundColour);
+                graphic.fillRect(0, 0, size.width, size.height);
+                graphic.setColor(Color.black);
+                refresh();
+            }
+        });
         // Content pane will be set later with a root BorderLayout containing toolbar (WEST), canvas (CENTER), and properties (EAST)
 
         this.width = width;
@@ -76,6 +92,36 @@ public class Canvas {
         instructionsButton.setHorizontalAlignment(SwingConstants.LEFT);
         instructionsButton.addActionListener(ev -> { showInstructionsOverlay = !showInstructionsOverlay; refresh(); });
         toolBar.add(instructionsButton);
+        
+        // View toggle: Graph <-> Properties
+        JToggleButton viewToggle = new JToggleButton("Show Properties");
+        viewToggle.setToolTipText("Toggle between Graph and Properties view");
+        viewToggle.setPreferredSize(new Dimension(TOOLBAR_BUTTON_WIDTH, 32));
+        viewToggle.setMaximumSize(new Dimension(TOOLBAR_BUTTON_WIDTH, 32));
+        viewToggle.setMinimumSize(new Dimension(TOOLBAR_BUTTON_WIDTH, 32));
+        viewToggle.setHorizontalAlignment(SwingConstants.LEFT);
+        viewToggle.addActionListener(ev -> {
+            boolean toProperties = viewToggle.isSelected();
+            if (toProperties) {
+                selectedWindow = 1;
+                if (vertexList.size() > 0) {
+                    int[][] matrix = gP.generateAdjacencyMatrix(vertexList, edgeList);
+                    Vector<Vertex> tempList = gP.vertexConnectivity(vertexList);
+                    for (Vertex v : tempList) {
+                        vertexList.get(vertexList.indexOf(v)).wasClicked = true;
+                    }
+                    reloadVertexConnections(matrix, vertexList);
+                    gP.generateDistanceMatrixWeighted(vertexList, edgeList);
+                }
+                viewToggle.setText("Show Graph");
+            } else {
+                selectedWindow = 0;
+                viewToggle.setText("Show Properties");
+            }
+            erase();
+            refresh();
+        });
+        toolBar.add(viewToggle);
         toolBar.addSeparator();
 
         Object[][] toolData = {
@@ -152,6 +198,9 @@ public class Canvas {
         item.addActionListener(new MenuListener());
         menuOptions3.add(item);
         item = new JMenuItem("Properties");
+        item.addActionListener(new MenuListener());
+        menuOptions3.add(item);
+        item = new JMenuItem("Maximize Window");
         item.addActionListener(new MenuListener());
         menuOptions3.add(item);
 
@@ -339,6 +388,11 @@ public class Canvas {
                                         try {
                                             int w = Integer.parseInt(input.trim());
                                             edge.weight = w;
+                                            // If currently viewing Properties, recompute weighted distances immediately
+                                            if (selectedWindow == 1) {
+                                                gP.generateDistanceMatrixWeighted(vertexList, edgeList);
+                                                erase();
+                                            }
                                         } catch (NumberFormatException ex) {
                                             // ignore invalid input
                                         }
@@ -545,11 +599,33 @@ public class Canvas {
                     // Hide direction arrows when disabled
                     for (Edge edge : edgeList) edge.isDirected = false;
                 }
+                // If Properties view is active, recompute matrices
+                if (selectedWindow == 1) {
+                    int[][] matrix = gP.generateAdjacencyMatrix(vertexList, edgeList);
+                    Vector<Vertex> tempList = gP.vertexConnectivity(vertexList);
+                    for (Vertex v : tempList) {
+                        vertexList.get(vertexList.indexOf(v)).wasClicked = true;
+                    }
+                    reloadVertexConnections(matrix, vertexList);
+                    gP.generateDistanceMatrixWeighted(vertexList, edgeList);
+                    erase();
+                }
                 refresh();
             } else if (command.equals("Invert Edge Direction")) {
                 selectedTool = 7;
             } else if (command.equals("Enable Weights")) {
                 weightsEnabled = !weightsEnabled;
+                // If Properties view is active, recompute matrices
+                if (selectedWindow == 1) {
+                    int[][] matrix = gP.generateAdjacencyMatrix(vertexList, edgeList);
+                    Vector<Vertex> tempList = gP.vertexConnectivity(vertexList);
+                    for (Vertex v : tempList) {
+                        vertexList.get(vertexList.indexOf(v)).wasClicked = true;
+                    }
+                    reloadVertexConnections(matrix, vertexList);
+                    gP.generateDistanceMatrixWeighted(vertexList, edgeList);
+                    erase();
+                }
                 refresh();
             } else if (command.equals("Set Edge Weight")) {
                 selectedTool = 8;
@@ -598,14 +674,17 @@ public class Canvas {
                     }
                     reloadVertexConnections(matrix, vertexList);
 
-                    //distance
-                    gP.generateDistanceMatrix(vertexList);
+                    //distance (weighted + direction-aware)
+                    gP.generateDistanceMatrixWeighted(vertexList, edgeList);
 
                     //VD paths
                     gP.displayContainers(vertexList);
                 //gP.drawNWideDiameter();
                 }
                 erase();
+            } else if (command.equals("Maximize Window")) {
+                frame.setExtendedState(JFrame.MAXIMIZED_BOTH);
+                frame.validate();
             } else if (command.equals("Instructions")) {
                 showInstructions();
             }
