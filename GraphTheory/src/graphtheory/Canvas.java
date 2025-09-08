@@ -5,6 +5,7 @@ package graphtheory;
  * @author mk
  */
 import javax.swing.*;
+import javax.swing.table.DefaultTableModel;
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
@@ -81,8 +82,10 @@ public class Canvas {
             {"Add Vertex", "Ctrl+A", "Click to add a new vertex."},
             {"Add Edges", "Ctrl+E", "Drag between nodes to connect. (Double-click on the selected node for a self-loop)"},
             {"Grab Tool", "Ctrl+G", "Click and drag to move vertices."},
+            {"Highlight Tool", null, "Click an edge to highlight it; click a node to highlight it and its incident edges."},
             {"Remove Tool", null, "(Double-click on the selected node/edge) to remove it."},
             {"Set Node Color", null, "Select a color, then click a node to apply it."},
+            {"Set Vertex Label", null, "Click a node to set or edit its label (name)."},
             {"Set Edge Color", null, "Select a color, then click an edge to apply it."},
             {"Enable Directionality", null, "Toggle directed edges on or off."},
             {"Invert Edge Direction", null, "Click a directed edge to reverse its direction."},
@@ -139,6 +142,9 @@ public class Canvas {
         menuOptions1.add(item);
         item = new JMenuItem("Save to File");
         item.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_S, KeyEvent.CTRL_DOWN_MASK));
+        item.addActionListener(new MenuListener());
+        menuOptions1.add(item);
+        item = new JMenuItem("Import From Matrix...");
         item.addActionListener(new MenuListener());
         menuOptions1.add(item);
 
@@ -242,17 +248,50 @@ public class Canvas {
                                     }
                                 }
                                 if (selectedEdge != null) {
-                                    selectedEdge.vertex1.connectedVertices.remove(selectedEdge.vertex2);
-                                    if (selectedEdge.vertex1 != selectedEdge.vertex2) {
-                                        selectedEdge.vertex2.connectedVertices.remove(selectedEdge.vertex1);
-                                    }
+                                    // Remove only the clicked arrow (edge)
                                     edgeList.remove(selectedEdge);
+                                    // Update adjacency only if no other edge remains between the pair
+                                    if (!hasAnyEdgeBetween(selectedEdge.vertex1, selectedEdge.vertex2)) {
+                                        selectedEdge.vertex1.connectedVertices.remove(selectedEdge.vertex2);
+                                        if (selectedEdge.vertex1 != selectedEdge.vertex2) {
+                                            selectedEdge.vertex2.connectedVertices.remove(selectedEdge.vertex1);
+                                        }
+                                    }
                                 }
                             }
                             // Clear any selection
                             for (Vertex v : vertexList) v.wasClicked = false;
                             for (Edge edge : edgeList) edge.wasClicked = false;
                         }
+                        break;
+                    }
+                    case 10: { // Highlight Tool
+                        // Clear previous highlights
+                        for (Vertex v : vertexList) v.wasClicked = false;
+                        for (Edge ed : edgeList) ed.wasClicked = false;
+                        // Prefer edge highlight if an edge is under cursor
+                        boolean highlighted = false;
+                        for (Edge ed : edgeList) {
+                            if (ed.hasIntersection(e.getX(), e.getY())) {
+                                ed.wasClicked = true;
+                                highlighted = true;
+                                break;
+                            }
+                        }
+                        if (!highlighted) {
+                            for (Vertex v : vertexList) {
+                                if (v.hasIntersection(e.getX(), e.getY())) {
+                                    v.wasClicked = true;
+                                    for (Edge ed : edgeList) {
+                                        if (ed.vertex1 == v || ed.vertex2 == v) {
+                                            ed.wasClicked = true;
+                                        }
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                        refresh();
                         break;
                     }
                     case 5: { // Set Node Color
@@ -306,6 +345,21 @@ public class Canvas {
                                     }
                                     break;
                                 }
+                            }
+                        }
+                        break;
+                    }
+                    case 9: { // Set Vertex Label
+                        for (Vertex vtx : vertexList) {
+                            if (vtx.hasIntersection(e.getX(), e.getY())) {
+                                String input = JOptionPane.showInputDialog(frame, "Set vertex label:", vtx.name);
+                                if (input != null) {
+                                    String trimmed = input.trim();
+                                    if (!trimmed.isEmpty()) {
+                                        vtx.name = trimmed;
+                                    }
+                                }
+                                break;
                             }
                         }
                         break;
@@ -467,6 +521,10 @@ public class Canvas {
             } else if (command.equals("Set Edge Color")) {
                 selectedTool = 6;
                 selectedColor = JColorChooser.showDialog(frame, "Choose Edge Color", Color.BLACK);
+            } else if (command.equals("Highlight Tool")) {
+                selectedTool = 10;
+            } else if (command.equals("Set Vertex Label")) {
+                selectedTool = 9;
             } else if (command.equals("Enable Directionality")) {
                 directionalityEnabled = !directionalityEnabled;
                 if (directionalityEnabled) {
@@ -522,6 +580,8 @@ public class Canvas {
                     fileManager.saveFile(vertexList, edgeList, fileManager.jF.getSelectedFile());
                     System.out.println(fileManager.jF.getSelectedFile());
                 }
+            } else if (command.equals("Import From Matrix...")) {
+                openImportDialog();
             } else if (command.equals("Graph")) {
                 selectedWindow = 0;
                 erase();
@@ -741,6 +801,205 @@ public class Canvas {
         return false;
     }
 
+    private boolean hasAnyEdgeBetween(Vertex a, Vertex b) {
+        for (Edge e : edgeList) {
+            if ((e.vertex1 == a && e.vertex2 == b) || (e.vertex1 == b && e.vertex2 == a)) return true;
+        }
+        return false;
+    }
+
+    // ===== Import From Matrix GUI =====
+    private void openImportDialog() {
+        JDialog dlg = new JDialog(frame, "Import Graph", true);
+        dlg.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
+        dlg.setLayout(new BorderLayout(10,10));
+
+        JPanel top = new JPanel(new BorderLayout(5,5));
+        top.setBorder(BorderFactory.createTitledBorder("Vertex Names (one per line)"));
+        JTextArea namesArea = new JTextArea(8, 24);
+        JScrollPane namesScroll = new JScrollPane(namesArea);
+        top.add(namesScroll, BorderLayout.CENTER);
+        JButton buildBtn = new JButton("Build Matrix");
+        top.add(buildBtn, BorderLayout.SOUTH);
+
+        JPanel center = new JPanel(new GridLayout(1,1));
+        center.setBorder(BorderFactory.createTitledBorder("Adjacency Matrix"));
+        JTable adjTable = new JTable();
+        JScrollPane adjScroll = new JScrollPane(adjTable);
+        center.add(adjScroll);
+
+        JPanel south = new JPanel();
+        south.setLayout(new BoxLayout(south, BoxLayout.Y_AXIS));
+        JCheckBox chkDirected = new JCheckBox("Directed (use asymmetric matrix)");
+        JCheckBox chkWeights = new JCheckBox("Enable Weights");
+        south.add(chkDirected);
+        south.add(chkWeights);
+
+        JPanel weightPanel = new JPanel(new BorderLayout());
+        weightPanel.setBorder(BorderFactory.createTitledBorder("Weights (optional)"));
+        JTable weightTable = new JTable();
+        JScrollPane weightScroll = new JScrollPane(weightTable);
+        weightPanel.add(weightScroll, BorderLayout.CENTER);
+        weightPanel.setVisible(false);
+        south.add(weightPanel);
+
+        JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        JButton cancel = new JButton("Cancel");
+        JButton importBtn = new JButton("Import");
+        buttons.add(cancel);
+        buttons.add(importBtn);
+
+        dlg.add(top, BorderLayout.NORTH);
+        dlg.add(center, BorderLayout.CENTER);
+        dlg.add(south, BorderLayout.EAST);
+        dlg.add(buttons, BorderLayout.SOUTH);
+
+        final int[] nHolder = new int[]{0};
+
+        class BooleanTableModel extends DefaultTableModel {
+            BooleanTableModel(int rows, int cols) { super(rows, cols); }
+            @Override public Class<?> getColumnClass(int columnIndex) { return Boolean.class; }
+            @Override public boolean isCellEditable(int row, int column) { return true; }
+        }
+
+        class IntegerTableModel extends DefaultTableModel {
+            IntegerTableModel(int rows, int cols) { super(rows, cols); }
+            @Override public Class<?> getColumnClass(int columnIndex) { return Integer.class; }
+            @Override public boolean isCellEditable(int row, int column) { return true; }
+        }
+
+        buildBtn.addActionListener(ev -> {
+            String[] lines = namesArea.getText().split("\n");
+            java.util.List<String> names = new java.util.ArrayList<>();
+            for (String s : lines) {
+                String t = s.trim();
+                if (!t.isEmpty()) names.add(t);
+            }
+            if (names.isEmpty()) {
+                JOptionPane.showMessageDialog(dlg, "Please enter at least one vertex name.", "Input Required", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+            int n = names.size();
+            nHolder[0] = n;
+            Object[] headers = names.toArray(new Object[0]);
+            BooleanTableModel model = new BooleanTableModel(0, 0);
+            model.setColumnIdentifiers(headers);
+            model.setRowCount(n);
+            for (int r = 0; r < n; r++) {
+                for (int c = 0; c < n; c++) {
+                    model.setValueAt(Boolean.FALSE, r, c);
+                }
+            }
+            adjTable.setModel(model);
+            adjTable.getTableHeader().setReorderingAllowed(false);
+            adjTable.getTableHeader().repaint();
+            adjScroll.setViewportView(adjTable);
+
+            // Build default weight table too
+            IntegerTableModel wModel = new IntegerTableModel(0, 0);
+            wModel.setColumnIdentifiers(headers);
+            wModel.setRowCount(n);
+            for (int r = 0; r < n; r++) {
+                for (int c = 0; c < n; c++) {
+                    wModel.setValueAt(Integer.valueOf(1), r, c);
+                }
+            }
+            weightTable.setModel(wModel);
+            weightTable.getTableHeader().setReorderingAllowed(false);
+            weightTable.getTableHeader().repaint();
+            weightScroll.setViewportView(weightTable);
+        });
+
+        chkWeights.addActionListener(ev -> weightPanel.setVisible(chkWeights.isSelected()));
+        cancel.addActionListener(ev -> dlg.dispose());
+
+        importBtn.addActionListener(ev -> {
+            if (nHolder[0] <= 0 || adjTable.getModel() == null || adjTable.getRowCount() == 0) {
+                JOptionPane.showMessageDialog(dlg, "Please click 'Build Matrix' after entering vertex names.", "Build Matrix First", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+            int n = nHolder[0];
+            // Collect names again (trimmed, non-empty) to keep consistent ordering
+            String[] lines2 = namesArea.getText().split("\n");
+            java.util.List<String> names = new java.util.ArrayList<>();
+            for (String s : lines2) {
+                String t = s.trim();
+                if (!t.isEmpty()) names.add(t);
+            }
+            if (names.size() != n) {
+                JOptionPane.showMessageDialog(dlg, "Vertex list changed. Click 'Build Matrix' again.", "Rebuild Required", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+
+            // Build new graph
+            saveState();
+            edgeList.clear();
+            vertexList.clear();
+            for (int i = 0; i < n; i++) {
+                Vertex v = new Vertex(names.get(i), 100, 100);
+                vertexList.add(v);
+            }
+
+            boolean directed = chkDirected.isSelected();
+            boolean withWeights = chkWeights.isSelected();
+
+            // Build edges from adjacency
+            for (int i = 0; i < n; i++) {
+                for (int j = 0; j < n; j++) {
+                    boolean present = Boolean.TRUE.equals(adjTable.getValueAt(i, j));
+                    if (!directed) {
+                        if (i < j) {
+                            boolean presentPair = present || Boolean.TRUE.equals(adjTable.getValueAt(j, i));
+                            if (presentPair) {
+                                Edge e = new Edge(vertexList.get(i), vertexList.get(j));
+                                e.isDirected = false;
+                                if (withWeights) {
+                                    Object w1 = weightTable.getValueAt(i, j);
+                                    Object w2 = weightTable.getValueAt(j, i);
+                                    int w = 1;
+                                    try { w = Integer.parseInt(String.valueOf(w1)); } catch (Exception ex) {
+                                        try { w = Integer.parseInt(String.valueOf(w2)); } catch (Exception ex2) { w = 1; }
+                                    }
+                                    e.weight = w;
+                                }
+                                edgeList.add(e);
+                                vertexList.get(i).addVertex(vertexList.get(j));
+                                vertexList.get(j).addVertex(vertexList.get(i));
+                            }
+                        }
+                    } else { // directed
+                        if (present && i != j) {
+                            Edge e = new Edge(vertexList.get(i), vertexList.get(j));
+                            e.isDirected = true;
+                            if (withWeights) {
+                                Object w1 = weightTable.getValueAt(i, j);
+                                int w = 1;
+                                try { w = Integer.parseInt(String.valueOf(w1)); } catch (Exception ex) { w = 1; }
+                                e.weight = w;
+                            }
+                            edgeList.add(e);
+                            vertexList.get(i).addVertex(vertexList.get(j));
+                            vertexList.get(j).addVertex(vertexList.get(i));
+                        }
+                    }
+                }
+            }
+
+            // Apply toggles to match user choice
+            directionalityEnabled = directed;
+            weightsEnabled = withWeights;
+
+            arrangeVertices();
+            erase();
+            refresh();
+            dlg.dispose();
+        });
+
+        dlg.setSize(900, 600);
+        dlg.setLocationRelativeTo(frame);
+        dlg.setVisible(true);
+    }
+
     private String getInstructionForSelectedTool() {
         switch (selectedTool) {
             case 1:
@@ -759,6 +1018,10 @@ public class Canvas {
                 return "Invert Edge Direction: Click a directed edge to reverse direction (when directionality is enabled).";
             case 8:
                 return "Set Edge Weight: Click an edge to set its weight (Enable Weights first).";
+            case 9:
+                return "Set Vertex Label: Click a node to set or edit its label (name).";
+            case 10:
+                return "Highlight Tool: Click an edge to highlight it; click a node to highlight it and its incident edges.";
             default:
                 return "Select a tool from the left toolbar to see instructions.";
         }

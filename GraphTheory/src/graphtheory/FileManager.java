@@ -5,6 +5,7 @@
 package graphtheory;
 
 import java.awt.Point;
+import java.awt.Color;
 import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileReader;
@@ -61,7 +62,7 @@ public class FileManager {
 
     }
 
-    // New format that appends an EDGES section after positions to persist directionality and weights
+    // New format that appends a VERTEX_COLORS section and an EDGES section after positions to persist colors, directionality and weights
     public void saveFile(Vector<Vertex> vList, Vector<Edge> eList, File fName) {
         try {
             BufferedWriter out = new BufferedWriter(new FileWriter(fName));
@@ -89,6 +90,15 @@ public class FileManager {
                 out.newLine();
             }
 
+            // VERTEX_COLORS section
+            out.write("VERTEX_COLORS");
+            out.newLine();
+            for (Vertex v : vList) {
+                Color c = v.color != null ? v.color : Color.BLACK;
+                out.write(c.getRed() + "," + c.getGreen() + "," + c.getBlue());
+                out.newLine();
+            }
+
             // EDGES section
             out.write("EDGES");
             out.newLine();
@@ -98,7 +108,8 @@ public class FileManager {
                 int i1 = vList.indexOf(e.vertex1);
                 int i2 = vList.indexOf(e.vertex2);
                 if (i1 < 0 || i2 < 0) continue; // skip inconsistent
-                out.write(i1 + "," + i2 + "," + (e.isDirected ? 1 : 0) + "," + e.weight);
+                Color c = e.color != null ? e.color : Color.BLACK;
+                out.write(i1 + "," + i2 + "," + (e.isDirected ? 1 : 0) + "," + e.weight + "," + c.getRed() + "," + c.getGreen() + "," + c.getBlue());
                 out.newLine();
             }
             out.close();
@@ -146,9 +157,24 @@ public class FileManager {
                     }
                 }
                 // Optional EDGES section
-                if (data.hasNextLine()) {
-                    String maybeTag = data.nextLine();
-                    if ("EDGES".equals(maybeTag)) {
+                // Parse optional sections (VERTEX_COLORS, EDGES) in any order until EOF
+                while (data.hasNextLine()) {
+                    String tag = data.nextLine().trim();
+                    if ("VERTEX_COLORS".equals(tag)) {
+                        // Expect exactly vertexList.size() lines of r,g,b
+                        for (int i = 0; i < vertexList.size() && data.hasNextLine(); i++) {
+                            String line = data.nextLine();
+                            String[] rgb = line.split(",");
+                            if (rgb.length >= 3) {
+                                try {
+                                    int r = Integer.parseInt(rgb[0]);
+                                    int g = Integer.parseInt(rgb[1]);
+                                    int b = Integer.parseInt(rgb[2]);
+                                    vertexList.get(i).color = new Color(r, g, b);
+                                } catch (Exception ignore) {}
+                            }
+                        }
+                    } else if ("EDGES".equals(tag)) {
                         Vector<Edge> parsedEdges = new Vector<Edge>();
                         if (data.hasNextLine()) {
                             int eCount = Integer.parseInt(data.nextLine());
@@ -160,10 +186,20 @@ public class FileManager {
                                     int i2 = Integer.parseInt(parts[1]);
                                     boolean directed = Integer.parseInt(parts[2]) == 1;
                                     int weight = Integer.parseInt(parts[3]);
+                                    Color color = Color.BLACK;
+                                    if (parts.length >= 7) {
+                                        try {
+                                            int r = Integer.parseInt(parts[4]);
+                                            int g = Integer.parseInt(parts[5]);
+                                            int b = Integer.parseInt(parts[6]);
+                                            color = new Color(r, g, b);
+                                        } catch (Exception ignore) {}
+                                    }
                                     if (i1 >= 0 && i1 < vertexList.size() && i2 >= 0 && i2 < vertexList.size()) {
                                         Edge e = new Edge(vertexList.get(i1), vertexList.get(i2));
                                         e.isDirected = directed;
                                         e.weight = weight;
+                                        e.color = color;
                                         parsedEdges.add(e);
                                     }
                                 }
@@ -173,6 +209,9 @@ public class FileManager {
                         if (!parsedEdges.isEmpty()) {
                             edgeList = parsedEdges;
                         }
+                    } else {
+                        // Unknown tag or EOF
+                        break;
                     }
                 }
             }
