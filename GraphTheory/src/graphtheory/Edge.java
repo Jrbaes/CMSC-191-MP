@@ -22,6 +22,7 @@ public class Edge {
     public boolean wasFocused;
     public boolean wasClicked;
     public boolean isDirected = false;
+    public int weight = 1; // default edge weight
 
     public Edge(Vertex v1, Vertex v2) {
         vertex1 = v1;

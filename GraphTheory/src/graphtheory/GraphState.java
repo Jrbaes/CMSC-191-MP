@@ -42,6 +42,8 @@ public class GraphState {
         Vertex v2 = findClonedVertex(original.vertex2, clonedVertices);
         Edge clone = new Edge(v1, v2);
         clone.color = original.color;
+        clone.isDirected = original.isDirected;
+        clone.weight = original.weight;
         return clone;
     }
 

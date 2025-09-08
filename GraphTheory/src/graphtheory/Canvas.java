@@ -33,6 +33,7 @@ public class Canvas {
     private FileManager fileManager = new FileManager();
     private boolean directionalityEnabled = false;
     private boolean showInstructionsOverlay = false;
+    private boolean weightsEnabled = false;
     private static final int TOOLBAR_BUTTON_WIDTH = 200;
     private JPanel propertiesPanel;
 
@@ -85,6 +86,8 @@ public class Canvas {
             {"Set Edge Color", null, "Select a color, then click an edge to apply it."},
             {"Enable Directionality", null, "Toggle directed edges on or off."},
             {"Invert Edge Direction", null, "Click a directed edge to reverse its direction."},
+            {"Enable Weights", null, "Toggle showing and editing edge weights."},
+            {"Set Edge Weight", null, "Click an edge to set its weight (Enable Weights first)."},
             {"Auto Arrange Vertices", null, "Arrange vertices in a circle."},
             {"Undo", "Ctrl+Z", "Undo the last action."},
             {"Redo", "Ctrl+Y", "Redo the last undone action."},
@@ -288,6 +291,25 @@ public class Canvas {
                         }
                         break;
                     }
+                    case 8: { // Set Edge Weight
+                        if (weightsEnabled) {
+                            for (Edge edge : edgeList) {
+                                if (edge.hasIntersection(e.getX(), e.getY())) {
+                                    String input = JOptionPane.showInputDialog(frame, "Set edge weight:", Integer.toString(edge.weight));
+                                    if (input != null) {
+                                        try {
+                                            int w = Integer.parseInt(input.trim());
+                                            edge.weight = w;
+                                        } catch (NumberFormatException ex) {
+                                            // ignore invalid input
+                                        }
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                        break;
+                    }
                 }
             }
             //refresh();
@@ -353,7 +375,8 @@ public class Canvas {
                         for (Vertex v : vertexList) {
                             if (v.hasIntersection(e.getX(), e.getY())) {
                                 if (!v.connectedToVertex(parentV) && v != parentV) { // Edge to another vertex
-                                    Edge edge = new Edge(v, parentV);
+                                    // Direction from first (pressed) to second (released)
+                                    Edge edge = new Edge(parentV, v);
                                     edge.isDirected = directionalityEnabled;
                                     v.addVertex(parentV);
                                     parentV.addVertex(v);
@@ -446,13 +469,32 @@ public class Canvas {
                 selectedColor = JColorChooser.showDialog(frame, "Choose Edge Color", Color.BLACK);
             } else if (command.equals("Enable Directionality")) {
                 directionalityEnabled = !directionalityEnabled;
-                // Apply to all existing edges
-                for (Edge edge : edgeList) {
-                    edge.isDirected = directionalityEnabled;
+                if (directionalityEnabled) {
+                    // Make all edges directed and ensure reverse edges exist
+                    Vector<Edge> toAdd = new Vector<>();
+                    for (Edge edge : edgeList) {
+                        edge.isDirected = true;
+                        if (edge.vertex1 != edge.vertex2 && !hasDirectedEdge(edge.vertex2, edge.vertex1)) {
+                            Edge rev = new Edge(edge.vertex2, edge.vertex1);
+                            rev.color = edge.color;
+                            rev.isDirected = true;
+                            rev.weight = edge.weight;
+                            toAdd.add(rev);
+                        }
+                    }
+                    edgeList.addAll(toAdd);
+                } else {
+                    // Hide direction arrows when disabled
+                    for (Edge edge : edgeList) edge.isDirected = false;
                 }
                 refresh();
             } else if (command.equals("Invert Edge Direction")) {
                 selectedTool = 7;
+            } else if (command.equals("Enable Weights")) {
+                weightsEnabled = !weightsEnabled;
+                refresh();
+            } else if (command.equals("Set Edge Weight")) {
+                selectedTool = 8;
             } else if (command.equals("Undo")) {
                 undo();
             } else if (command.equals("Redo")) {
@@ -477,7 +519,7 @@ public class Canvas {
             } else if (command.equals("Save to File")) {
                 int returnValue = fileManager.jF.showSaveDialog(frame);
                 if (returnValue == JFileChooser.APPROVE_OPTION) {
-                    fileManager.saveFile(vertexList,fileManager.jF.getSelectedFile());
+                    fileManager.saveFile(vertexList, edgeList, fileManager.jF.getSelectedFile());
                     System.out.println(fileManager.jF.getSelectedFile());
                 }
             } else if (command.equals("Graph")) {
@@ -593,8 +635,26 @@ public class Canvas {
     }
 
     public void refresh() {
+        // Clear back buffer to avoid drawing ghosts
+        graphic.setColor(backgroundColour);
+        graphic.fillRect(0, 0, width, height);
+
+        // Draw edges (hide arrows when directionality is disabled)
         for (Edge e : edgeList) {
+            boolean orig = e.isDirected;
+            if (!directionalityEnabled) e.isDirected = false;
             e.draw(graphic);
+            e.isDirected = orig;
+
+            // Draw weight label if enabled
+            if (weightsEnabled && e.vertex1 != null && e.vertex2 != null) {
+                int mx = (e.vertex1.location.x + e.vertex2.location.x) / 2;
+                int my = (e.vertex1.location.y + e.vertex2.location.y) / 2;
+                Color prev = graphic.getColor();
+                graphic.setColor(Color.BLACK);
+                graphic.drawString(Integer.toString(e.weight), mx + 6, my - 6);
+                graphic.setColor(prev);
+            }
         }
         for (Vertex v : vertexList) {
             v.draw(graphic);
@@ -674,6 +734,13 @@ public class Canvas {
         graphic.drawLine(x1, y1, x2, y2);
     }
 
+    private boolean hasDirectedEdge(Vertex a, Vertex b) {
+        for (Edge e : edgeList) {
+            if (e.vertex1 == a && e.vertex2 == b) return true;
+        }
+        return false;
+    }
+
     private String getInstructionForSelectedTool() {
         switch (selectedTool) {
             case 1:
@@ -690,6 +757,8 @@ public class Canvas {
                 return "Set Edge Color: Choose a color, then click an edge to apply it.";
             case 7:
                 return "Invert Edge Direction: Click a directed edge to reverse direction (when directionality is enabled).";
+            case 8:
+                return "Set Edge Weight: Click an edge to set its weight (Enable Weights first).";
             default:
                 return "Select a tool from the left toolbar to see instructions.";
         }
