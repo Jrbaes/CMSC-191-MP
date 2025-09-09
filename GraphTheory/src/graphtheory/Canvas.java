@@ -18,6 +18,7 @@ import java.util.Vector;
 import java.util.Stack;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
+import java.awt.geom.AffineTransform;
 
 public class Canvas {
 
@@ -37,6 +38,11 @@ public class Canvas {
     private boolean directionalityEnabled = false;
     private boolean showInstructionsOverlay = false;
     private boolean weightsEnabled = false;
+    private boolean darkMode = false;
+    private double zoom = 1.0;
+    private int panX = 0, panY = 0;
+    private int lastMouseX = 0, lastMouseY = 0;
+    private Vertex pathSource = null;
     private static final int TOOLBAR_BUTTON_WIDTH = 200;
     private JPanel propertiesPanel;
 
@@ -128,6 +134,10 @@ public class Canvas {
             {"Add Vertex", "Ctrl+A", "Click to add a new vertex."},
             {"Add Edges", "Ctrl+E", "Drag between nodes to connect. (Double-click on the selected node for a self-loop)"},
             {"Grab Tool", "Ctrl+G", "Click and drag to move vertices."},
+            {"Pan View", null, "Click and drag to pan the view."},
+            {"Zoom In", null, "Zoom in the view."},
+            {"Zoom Out", null, "Zoom out the view."},
+            {"Reset View", null, "Reset pan and zoom back to default."},
             {"Highlight Tool", null, "Click an edge to highlight it; click a node to highlight it and its incident edges."},
             {"Remove Tool", null, "(Double-click on the selected node/edge) to remove it."},
             {"Set Node Color", null, "Select a color, then click a node to apply it."},
@@ -137,6 +147,10 @@ public class Canvas {
             {"Invert Edge Direction", null, "Click a directed edge to reverse its direction."},
             {"Enable Weights", null, "Toggle showing and editing edge weights."},
             {"Set Edge Weight", null, "Click an edge to set its weight (Enable Weights first)."},
+            {"Dijkstra Path", null, "Click source vertex, then target vertex to visualize shortest path (Dijkstra)."},
+            {"Bellman-Ford Path", null, "Click source vertex, then target vertex to visualize shortest path (Bellman-Ford)."},
+            {"APSP (Floyd-Warshall)", null, "Compute all-pairs shortest paths and show in Properties."},
+            {"Graph Complement", null, "Replace the graph with its complement (respects directionality setting)."},
             {"Auto Arrange Vertices", null, "Arrange vertices in a circle."},
             {"Undo", "Ctrl+Z", "Undo the last action."},
             {"Redo", "Ctrl+Y", "Redo the last undone action."},
@@ -199,6 +213,11 @@ public class Canvas {
         item.addActionListener(new MenuListener());
         menuOptions1.add(item);
 
+        menuOptions1.addSeparator();
+        JCheckBoxMenuItem darkModeItem = new JCheckBoxMenuItem("Dark Mode");
+        darkModeItem.addActionListener(new MenuListener());
+        menuOptions1.add(darkModeItem);
+
         menuBar.add(menuOptions1);
 
         frame.setJMenuBar(menuBar);
@@ -224,7 +243,7 @@ public class Canvas {
             if (selectedWindow == 0) {
                 if (e.getClickCount() == 2 && selectedTool == 2) { // Double-click for self-loop
                     for (Vertex v : vertexList) {
-                        if (v.hasIntersection(e.getX(), e.getY())) {
+                        if (vertexHit(v, e.getX(), e.getY())) {
                             Edge edge = new Edge(v, v);
                             edge.isDirected = directionalityEnabled;
                             edgeList.add(edge);
@@ -235,7 +254,7 @@ public class Canvas {
                 } else {
                     switch (selectedTool) {
                         case 1: {
-                            Vertex v = new Vertex("" + vertexList.size(), e.getX(), e.getY());
+                            Vertex v = new Vertex("" + vertexList.size(), toWorldX(e.getX()), toWorldY(e.getY()));
                             vertexList.add(v);
                             v.draw(graphic);
                             break;
@@ -245,7 +264,7 @@ public class Canvas {
                             // Single-click: select vertex or edge under cursor
                             boolean selectedSomething = false;
                             for (Vertex v : vertexList) {
-                                if (v.hasIntersection(e.getX(), e.getY())) {
+                                if (vertexHit(v, e.getX(), e.getY())) {
                                     v.wasClicked = true;
                                     selectedSomething = true;
                                 } else {
@@ -253,7 +272,7 @@ public class Canvas {
                                 }
                             }
                             for (Edge edge : edgeList) {
-                                if (edge.hasIntersection(e.getX(), e.getY())) {
+                                if (edgeHit(edge, e.getX(), e.getY())) {
                                     edge.wasClicked = true;
                                     selectedSomething = true;
                                 } else {
@@ -265,7 +284,7 @@ public class Canvas {
                             // Double-click: if selected vertex/edge is under cursor, remove it
                             Vertex selectedVertex = null;
                             for (Vertex v : vertexList) {
-                                if (v.wasClicked && v.hasIntersection(e.getX(), e.getY())) {
+                                if (v.wasClicked && vertexHit(v, e.getX(), e.getY())) {
                                     selectedVertex = v;
                                     break;
                                 }
@@ -285,7 +304,7 @@ public class Canvas {
                             } else {
                                 Edge selectedEdge = null;
                                 for (Edge edge : edgeList) {
-                                    if (edge.wasClicked && edge.hasIntersection(e.getX(), e.getY())) {
+                                    if (edge.wasClicked && edgeHit(edge, e.getX(), e.getY())) {
                                         selectedEdge = edge;
                                         break;
                                     }
@@ -308,6 +327,9 @@ public class Canvas {
                         }
                         break;
                     }
+                    case 11: { // Pan View - no action on click
+                        break;
+                    }
                     case 10: { // Highlight Tool
                         // Clear previous highlights
                         for (Vertex v : vertexList) v.wasClicked = false;
@@ -315,7 +337,7 @@ public class Canvas {
                         // Prefer edge highlight if an edge is under cursor
                         boolean highlighted = false;
                         for (Edge ed : edgeList) {
-                            if (ed.hasIntersection(e.getX(), e.getY())) {
+                            if (edgeHit(ed, e.getX(), e.getY())) {
                                 ed.wasClicked = true;
                                 highlighted = true;
                                 break;
@@ -323,7 +345,7 @@ public class Canvas {
                         }
                         if (!highlighted) {
                             for (Vertex v : vertexList) {
-                                if (v.hasIntersection(e.getX(), e.getY())) {
+                                if (vertexHit(v, e.getX(), e.getY())) {
                                     v.wasClicked = true;
                                     for (Edge ed : edgeList) {
                                         if (ed.vertex1 == v || ed.vertex2 == v) {
@@ -340,7 +362,7 @@ public class Canvas {
                     case 5: { // Set Node Color
                         if (selectedColor != null) {
                             for (Vertex v : vertexList) {
-                                if (v.hasIntersection(e.getX(), e.getY())) {
+                                if (vertexHit(v, e.getX(), e.getY())) {
                                     v.color = selectedColor;
                                     break;
                                 }
@@ -351,7 +373,7 @@ public class Canvas {
                     case 6: { // Set Edge Color
                         if (selectedColor != null) {
                             for (Edge edge : edgeList) {
-                                if (edge.hasIntersection(e.getX(), e.getY())) {
+                                if (edgeHit(edge, e.getX(), e.getY())) {
                                     edge.color = selectedColor;
                                     break;
                                 }
@@ -362,7 +384,7 @@ public class Canvas {
                     case 7: { // Invert Edge Direction
                         if (directionalityEnabled) {
                             for (Edge edge : edgeList) {
-                                if (edge.hasIntersection(e.getX(), e.getY())) {
+                                if (edgeHit(edge, e.getX(), e.getY())) {
                                     // Swap the vertices to invert the direction
                                     Vertex temp = edge.vertex1;
                                     edge.vertex1 = edge.vertex2;
@@ -376,7 +398,7 @@ public class Canvas {
                     case 8: { // Set Edge Weight
                         if (weightsEnabled) {
                             for (Edge edge : edgeList) {
-                                if (edge.hasIntersection(e.getX(), e.getY())) {
+                                if (edgeHit(edge, e.getX(), e.getY())) {
                                     String input = JOptionPane.showInputDialog(frame, "Set edge weight:", Integer.toString(edge.weight));
                                     if (input != null) {
                                         try {
@@ -399,7 +421,7 @@ public class Canvas {
                     }
                     case 9: { // Set Vertex Label
                         for (Vertex vtx : vertexList) {
-                            if (vtx.hasIntersection(e.getX(), e.getY())) {
+                            if (vertexHit(vtx, e.getX(), e.getY())) {
                                 String input = JOptionPane.showInputDialog(frame, "Set vertex label:", vtx.name);
                                 if (input != null) {
                                     String trimmed = input.trim();
@@ -408,6 +430,64 @@ public class Canvas {
                                     }
                                 }
                                 break;
+                            }
+                        }
+                        break;
+                    }
+                    case 12: // Dijkstra Path
+                    case 13: { // Bellman-Ford Path
+                        // Select source first, then target; visualize path
+                        Vertex clicked = null;
+                        for (Vertex vtx : vertexList) {
+                            if (vertexHit(vtx, e.getX(), e.getY())) { clicked = vtx; break; }
+                        }
+                        if (clicked != null) {
+                            if (pathSource == null) {
+                                pathSource = clicked;
+                                for (Vertex v : vertexList) v.wasClicked = false;
+                                for (Edge ed : edgeList) ed.wasClicked = false;
+                                clicked.wasClicked = true; // mark source
+                            } else {
+                                Vertex target = clicked;
+                                int srcIdx = vertexList.indexOf(pathSource);
+                                int tgtIdx = vertexList.indexOf(target);
+                                int[] prev = (selectedTool == 12)
+                                        ? gP.dijkstraPredecessor(vertexList, edgeList, srcIdx)
+                                        : gP.bellmanFordPredecessor(vertexList, edgeList, srcIdx);
+                                if (prev == null) {
+                                    JOptionPane.showMessageDialog(frame, "Negative cycle detected (Bellman-Ford).", "Shortest Path", JOptionPane.WARNING_MESSAGE);
+                                } else {
+                                    if (srcIdx != tgtIdx && prev[tgtIdx] == -1) {
+                                        JOptionPane.showMessageDialog(frame, "Target unreachable from source.", "Shortest Path", JOptionPane.INFORMATION_MESSAGE);
+                                    } else {
+                                        // Clear previous highlights
+                                        for (Vertex v : vertexList) v.wasClicked = false;
+                                        for (Edge ed : edgeList) ed.wasClicked = false;
+                                        // Reconstruct path
+                                        java.util.ArrayList<Integer> seq = new java.util.ArrayList<>();
+                                        for (int v = tgtIdx; v != -1; v = prev[v]) seq.add(0, v);
+                                        // Highlight vertices and edges
+                                        for (int i = 0; i < seq.size(); i++) {
+                                            vertexList.get(seq.get(i)).wasClicked = true;
+                                            if (i + 1 < seq.size()) {
+                                                Vertex a = vertexList.get(seq.get(i));
+                                                Vertex b = vertexList.get(seq.get(i+1));
+                                                Edge picked = null;
+                                                for (Edge ed : edgeList) {
+                                                    if (ed.vertex1 == a && ed.vertex2 == b) { picked = ed; break; }
+                                                }
+                                                if (picked == null) {
+                                                    for (Edge ed : edgeList) {
+                                                        if (!ed.isDirected && ((ed.vertex1 == b && ed.vertex2 == a))) { picked = ed; break; }
+                                                    }
+                                                }
+                                                if (picked != null) picked.wasClicked = true;
+                                            }
+                                        }
+                                        refresh();
+                                    }
+                                }
+                                pathSource = null; // reset selection
                             }
                         }
                         break;
@@ -434,7 +514,7 @@ public class Canvas {
                 switch (selectedTool) {
                     case 2: {
                         for (Vertex v : vertexList) {
-                            if (v.hasIntersection(e.getX(), e.getY())) {
+                            if (vertexHit(v, e.getX(), e.getY())) {
                                 v.wasClicked = true;
                                 clickedVertexIndex = vertexList.indexOf(v);
                             } else {
@@ -446,20 +526,25 @@ public class Canvas {
                     case 3: {
 
                         for (Edge d : edgeList) {
-                            if (d.hasIntersection(e.getX(), e.getY())) {
+                            if (edgeHit(d, e.getX(), e.getY())) {
                                 d.wasClicked = true;
                             } else {
                                 d.wasClicked = false;
                             }
                         }
                         for (Vertex v : vertexList) {
-                            if (v.hasIntersection(e.getX(), e.getY())) {
+                            if (vertexHit(v, e.getX(), e.getY())) {
                                 v.wasClicked = true;
                                 clickedVertexIndex = vertexList.indexOf(v);
                             } else {
                                 v.wasClicked = false;
                             }
                         }
+                        break;
+                    }
+                    case 11: {
+                        lastMouseX = e.getX();
+                        lastMouseY = e.getY();
                         break;
                     }
                 }
@@ -475,7 +560,7 @@ public class Canvas {
                     case 2: {
                         Vertex parentV = vertexList.get(clickedVertexIndex);
                         for (Vertex v : vertexList) {
-                            if (v.hasIntersection(e.getX(), e.getY())) {
+                            if (vertexHit(v, e.getX(), e.getY())) {
                                 if (!v.connectedToVertex(parentV) && v != parentV) { // Edge to another vertex
                                     // Direction from first (pressed) to second (released)
                                     Edge edge = new Edge(parentV, v);
@@ -511,15 +596,29 @@ public class Canvas {
                 switch (selectedTool) {
                     case 2: {
                         graphic.setColor(Color.RED);
-                        drawLine(vertexList.get(clickedVertexIndex).location.x, vertexList.get(clickedVertexIndex).location.y, e.getX(), e.getY());
+                        Graphics2D g2 = graphic;
+                        AffineTransform old = g2.getTransform();
+                        g2.translate(panX, panY);
+                        g2.scale(zoom, zoom);
+                        drawLine(vertexList.get(clickedVertexIndex).location.x, vertexList.get(clickedVertexIndex).location.y, toWorldX(e.getX()), toWorldY(e.getY()));
+                        g2.setTransform(old);
                         break;
 
                     }
                     case 3: {
                         if (vertexList.get(clickedVertexIndex).wasClicked) {
-                            vertexList.get(clickedVertexIndex).location.x = e.getX();
-                            vertexList.get(clickedVertexIndex).location.y = e.getY();
+                            vertexList.get(clickedVertexIndex).location.x = toWorldX(e.getX());
+                            vertexList.get(clickedVertexIndex).location.y = toWorldY(e.getY());
                         }
+                        break;
+                    }
+                    case 11: {
+                        int dx = e.getX() - lastMouseX;
+                        int dy = e.getY() - lastMouseY;
+                        panX += dx;
+                        panY += dy;
+                        lastMouseX = e.getX();
+                        lastMouseY = e.getY();
                         break;
                     }
                 }
@@ -532,14 +631,14 @@ public class Canvas {
         public void mouseMoved(MouseEvent e) {
             if (selectedWindow == 0) {
                 for (Edge d : edgeList) {
-                    if (d.hasIntersection(e.getX(), e.getY())) {
+                    if (edgeHit(d, e.getX(), e.getY())) {
                         d.wasFocused = true;
                     } else {
                         d.wasFocused = false;
                     }
                 }
                 for (Vertex v : vertexList) {
-                    if (v.hasIntersection(e.getX(), e.getY())) {
+                    if (vertexHit(v, e.getX(), e.getY())) {
                         v.wasFocused = true;
                     } else {
                         v.wasFocused = false;
@@ -561,6 +660,8 @@ public class Canvas {
                 selectedTool = 2;
             } else if (command.equals("Grab Tool")) {
                 selectedTool = 3;
+            } else if (command.equals("Pan View")) {
+                selectedTool = 11;
             } else if (command.equals("Remove Tool")) {
                 selectedTool = 4;
             } else if (command.equals("Set Node Color")) {
@@ -573,6 +674,18 @@ public class Canvas {
                 selectedTool = 10;
             } else if (command.equals("Set Vertex Label")) {
                 selectedTool = 9;
+            } else if (command.equals("Zoom In")) {
+                zoom = Math.min(5.0, zoom * 1.2);
+                refresh();
+            } else if (command.equals("Zoom Out")) {
+                zoom = Math.max(0.2, zoom / 1.2);
+                refresh();
+            } else if (command.equals("Reset View")) {
+                zoom = 1.0; panX = 0; panY = 0; refresh();
+            } else if (command.equals("Dijkstra Path")) {
+                selectedTool = 12;
+            } else if (command.equals("Bellman-Ford Path")) {
+                selectedTool = 13;
             } else if (command.equals("Enable Directionality")) {
                 directionalityEnabled = !directionalityEnabled;
                 if (directionalityEnabled) {
@@ -623,6 +736,20 @@ public class Canvas {
                 refresh();
             } else if (command.equals("Set Edge Weight")) {
                 selectedTool = 8;
+            } else if (command.equals("APSP (Floyd-Warshall)")) {
+                gP.floydWarshall(vertexList, edgeList);
+                selectedWindow = 1;
+                erase();
+            } else if (command.equals("Graph Complement")) {
+                saveState();
+                complementGraph();
+                erase();
+            } else if (command.equals("Graph Diameter/Radius")) {
+                computeAndShowDiameterRadius();
+            } else if (command.equals("Dark Mode")) {
+                darkMode = !darkMode;
+                backgroundColour = darkMode ? new Color(30,30,30) : Color.WHITE;
+                erase();
             } else if (command.equals("Undo")) {
                 undo();
             } else if (command.equals("Redo")) {
@@ -772,26 +899,34 @@ public class Canvas {
         graphic.setColor(backgroundColour);
         graphic.fillRect(0, 0, width, height);
 
+        // Apply pan/zoom for drawing graph content
+        Graphics2D g2 = graphic;
+        AffineTransform oldTx = g2.getTransform();
+        g2.translate(panX, panY);
+        g2.scale(zoom, zoom);
+
         // Draw edges (hide arrows when directionality is disabled)
         for (Edge e : edgeList) {
             boolean orig = e.isDirected;
             if (!directionalityEnabled) e.isDirected = false;
-            e.draw(graphic);
+            e.draw(g2);
             e.isDirected = orig;
 
             // Draw weight label if enabled
             if (weightsEnabled && e.vertex1 != null && e.vertex2 != null) {
                 int mx = (e.vertex1.location.x + e.vertex2.location.x) / 2;
                 int my = (e.vertex1.location.y + e.vertex2.location.y) / 2;
-                Color prev = graphic.getColor();
-                graphic.setColor(Color.BLACK);
-                graphic.drawString(Integer.toString(e.weight), mx + 6, my - 6);
-                graphic.setColor(prev);
+                Color prev = g2.getColor();
+                g2.setColor(darkMode ? Color.WHITE : Color.BLACK);
+                g2.drawString(Integer.toString(e.weight), mx + 6, my - 6);
+                g2.setColor(prev);
             }
         }
         for (Vertex v : vertexList) {
-            v.draw(graphic);
+            v.draw(g2);
         }
+        // Restore transform for UI overlays
+        g2.setTransform(oldTx);
 
         // Update properties panel
         propertiesPanel.removeAll();
@@ -806,6 +941,39 @@ public class Canvas {
             density = (2.0 * edgeList.size()) / (vertexList.size() * (vertexList.size() - 1));
         }
         propertiesPanel.add(new JLabel(String.format("Density: %.2f", density)));
+
+        // Diameter / Radius (via Floyd–Warshall)
+        if (!vertexList.isEmpty()) {
+            final int INF = 1_000_000_000;
+            int[][] dist = gP.floydWarshall(vertexList, edgeList);
+            boolean hasInf = false;
+            int diameter = 0;
+            int radius = Integer.MAX_VALUE;
+            for (int i = 0; i < vertexList.size(); i++) {
+                int ecc = 0;
+                boolean any = false;
+                for (int j = 0; j < vertexList.size(); j++) {
+                    if (i == j) continue;
+                    if (dist[i][j] >= INF) { hasInf = true; continue; }
+                    ecc = Math.max(ecc, dist[i][j]);
+                    any = true;
+                }
+                if (any) {
+                    diameter = Math.max(diameter, ecc);
+                    radius = Math.min(radius, ecc);
+                }
+            }
+            if (radius == Integer.MAX_VALUE) {
+                propertiesPanel.add(new JLabel("Diameter: N/A"));
+                propertiesPanel.add(new JLabel("Radius: N/A"));
+            } else {
+                propertiesPanel.add(new JLabel("Diameter: " + diameter));
+                propertiesPanel.add(new JLabel("Radius: " + radius));
+            }
+            if (hasInf) {
+                propertiesPanel.add(new JLabel("Note: Graph not fully connected (unreachable pairs ignored)."));
+            }
+        }
 
         // Node Degrees
         Vertex selectedVertex = null;
@@ -867,6 +1035,11 @@ public class Canvas {
         graphic.drawLine(x1, y1, x2, y2);
     }
 
+    private int toWorldX(int sx) { return (int)Math.round((sx - panX) / zoom); }
+    private int toWorldY(int sy) { return (int)Math.round((sy - panY) / zoom); }
+    private boolean vertexHit(Vertex v, int sx, int sy) { return v.hasIntersection(toWorldX(sx), toWorldY(sy)); }
+    private boolean edgeHit(Edge e, int sx, int sy) { return e.hasIntersection(toWorldX(sx), toWorldY(sy)); }
+
     private boolean hasDirectedEdge(Vertex a, Vertex b) {
         for (Edge e : edgeList) {
             if (e.vertex1 == a && e.vertex2 == b) return true;
@@ -879,6 +1052,94 @@ public class Canvas {
             if ((e.vertex1 == a && e.vertex2 == b) || (e.vertex1 == b && e.vertex2 == a)) return true;
         }
         return false;
+    }
+
+    private void complementGraph() {
+        int n = vertexList.size();
+        if (n <= 1) return;
+        // Build existence map
+        boolean[][] exist = new boolean[n][n];
+        for (Edge e : edgeList) {
+            int u = vertexList.indexOf(e.vertex1);
+            int v = vertexList.indexOf(e.vertex2);
+            if (u < 0 || v < 0) continue;
+            if (directionalityEnabled) {
+                exist[u][v] = true;
+            } else {
+                exist[u][v] = exist[v][u] = true;
+            }
+        }
+        Vector<Edge> newEdges = new Vector<>();
+        if (directionalityEnabled) {
+            for (int i = 0; i < n; i++) {
+                for (int j = 0; j < n; j++) {
+                    if (i == j) continue;
+                    if (!exist[i][j]) {
+                        Edge e = new Edge(vertexList.get(i), vertexList.get(j));
+                        e.isDirected = true;
+                        e.weight = 1;
+                        e.color = Color.BLACK;
+                        newEdges.add(e);
+                    }
+                }
+            }
+        } else {
+            for (int i = 0; i < n; i++) {
+                for (int j = i+1; j < n; j++) {
+                    if (!exist[i][j]) {
+                        Edge e = new Edge(vertexList.get(i), vertexList.get(j));
+                        e.isDirected = false;
+                        e.weight = 1;
+                        e.color = Color.BLACK;
+                        newEdges.add(e);
+                    }
+                }
+            }
+        }
+        edgeList = newEdges;
+        // Rebuild connectedVertices symmetrically
+        for (Vertex v : vertexList) v.connectedVertices.clear();
+        for (Edge e : edgeList) {
+            e.vertex1.addVertex(e.vertex2);
+            e.vertex2.addVertex(e.vertex1);
+        }
+        refresh();
+    }
+
+    private void computeAndShowDiameterRadius() {
+        int n = vertexList.size();
+        if (n == 0) {
+            JOptionPane.showMessageDialog(frame, "Graph is empty.", "Diameter/Radius", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        int[][] dist = gP.floydWarshall(vertexList, edgeList);
+        final int INF = 1_000_000_000;
+        boolean hasInf = false;
+        int diameter = 0;
+        int radius = Integer.MAX_VALUE;
+        for (int i = 0; i < n; i++) {
+            int ecc = 0;
+            boolean any = false;
+            for (int j = 0; j < n; j++) {
+                if (i == j) continue;
+                if (dist[i][j] >= INF) { hasInf = true; continue; }
+                ecc = Math.max(ecc, dist[i][j]);
+                any = true;
+            }
+            if (any) {
+                diameter = Math.max(diameter, ecc);
+                radius = Math.min(radius, ecc);
+            }
+        }
+        String note = hasInf ? "\nNote: Graph is not fully connected (under current directionality). Unreachable pairs ignored." : "";
+        if (radius == Integer.MAX_VALUE) {
+            JOptionPane.showMessageDialog(frame, "No finite paths between vertices." + note, "Diameter/Radius", JOptionPane.INFORMATION_MESSAGE);
+        } else {
+            JOptionPane.showMessageDialog(frame, "Diameter: " + diameter + "\nRadius: " + radius + note, "Diameter/Radius", JOptionPane.INFORMATION_MESSAGE);
+        }
+        selectedWindow = 1;
+        erase();
+        refresh();
     }
 
     // ===== Import From Matrix GUI =====
@@ -1189,7 +1450,7 @@ public class Canvas {
                     gP.drawDistanceMatrix(canvasImage2.getGraphics(), vertexList, width / 2 + 50, height / 2 + 50);//draw distance matrix
                     g.drawImage(canvasImage2, 0, 0, null); //layer 1
                     drawString("Graph disconnects when nodes in color red are removed.", 100, height - 30, 20);
-                    g.drawString("See output console for Diameter of Graph", 100, height / 2 + 50);
+                    // Removed outdated diameter console note
                     g.drawImage(canvasImage.getScaledInstance(width / 2, height / 2, Image.SCALE_SMOOTH), 0, 0, null); //layer 1
                     g.draw3DRect(0, 0, width / 2, height / 2, true);
                     g.setColor(Color.black);

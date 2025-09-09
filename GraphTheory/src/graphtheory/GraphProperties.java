@@ -19,6 +19,7 @@ public class GraphProperties {
 
     public int[][] adjacencyMatrix;
     public int[][] distanceMatrix;
+    public String distanceMatrixTitle = "ShortestPathMatrix";
     public Vector<VertexPair> vpList;
 
     public int[][] generateAdjacencyMatrix(Vector<Vertex> vList, Vector<Edge> eList) {
@@ -58,7 +59,124 @@ public class GraphProperties {
                 distanceMatrix[vList.indexOf(vp.vertex2)][vList.indexOf(vp.vertex1)] = shortestDistance;
             }
         }
+        distanceMatrixTitle = "ShortestPathMatrix (Dijkstra)";
         return distanceMatrix;
+    }
+
+    // Predecessor-based single-source shortest path (Dijkstra). Returns prev[] of indices; -1 denotes none.
+    @SuppressWarnings("unchecked")
+    public int[] dijkstraPredecessor(Vector<Vertex> vList, Vector<Edge> eList, int sourceIdx) {
+        int n = vList.size();
+        Vector<int[]>[] adj = new Vector[n];
+        for (int i = 0; i < n; i++) adj[i] = new Vector<>();
+        for (Edge e : eList) {
+            int u = vList.indexOf(e.vertex1);
+            int v = vList.indexOf(e.vertex2);
+            if (u < 0 || v < 0) continue;
+            int w = Math.max(0, e.weight);
+            adj[u].add(new int[]{v, w});
+            if (!e.isDirected) {
+                adj[v].add(new int[]{u, w});
+            }
+        }
+
+        final int INF = 1_000_000_000;
+        int[] dist = new int[n];
+        int[] prev = new int[n];
+        boolean[] used = new boolean[n];
+        Arrays.fill(dist, INF);
+        Arrays.fill(prev, -1);
+        dist[sourceIdx] = 0;
+
+        for (int it = 0; it < n; it++) {
+            int u = -1, best = INF;
+            for (int i = 0; i < n; i++) {
+                if (!used[i] && dist[i] < best) { best = dist[i]; u = i; }
+            }
+            if (u == -1) break;
+            used[u] = true;
+            for (int[] pr : adj[u]) {
+                int v = pr[0], w = pr[1];
+                if (dist[u] + w < dist[v]) {
+                    dist[v] = dist[u] + w;
+                    prev[v] = u;
+                }
+            }
+        }
+        return prev;
+    }
+
+    // Predecessor-based single-source shortest path (Bellman-Ford). Handles negative weights; returns prev[]; null if negative cycle detected.
+    public int[] bellmanFordPredecessor(Vector<Vertex> vList, Vector<Edge> eList, int sourceIdx) {
+        int n = vList.size();
+        final int INF = 1_000_000_000;
+        int[] dist = new int[n];
+        int[] prev = new int[n];
+        Arrays.fill(dist, INF);
+        Arrays.fill(prev, -1);
+        dist[sourceIdx] = 0;
+
+        // Build edge list as directed arcs; if e.isDirected == false, include both directions
+        class Arc { int u, v, w; Arc(int u, int v, int w){this.u=u;this.v=v;this.w=w;} }
+        java.util.List<Arc> arcs = new java.util.ArrayList<>();
+        for (Edge e : eList) {
+            int u = vList.indexOf(e.vertex1);
+            int v = vList.indexOf(e.vertex2);
+            if (u < 0 || v < 0) continue;
+            arcs.add(new Arc(u, v, e.weight));
+            if (!e.isDirected) arcs.add(new Arc(v, u, e.weight));
+        }
+
+        for (int i = 0; i < n - 1; i++) {
+            boolean any = false;
+            for (Arc a : arcs) {
+                if (dist[a.u] < INF && dist[a.u] + a.w < dist[a.v]) {
+                    dist[a.v] = dist[a.u] + a.w;
+                    prev[a.v] = a.u;
+                    any = true;
+                }
+            }
+            if (!any) break;
+        }
+        // Detect negative cycle (reachable)
+        for (Arc a : arcs) {
+            if (dist[a.u] < INF && dist[a.u] + a.w < dist[a.v]) {
+                return null;
+            }
+        }
+        return prev;
+    }
+
+    // Floyd-Warshall all-pairs shortest paths; returns dist matrix; sets distanceMatrix and title.
+    public int[][] floydWarshall(Vector<Vertex> vList, Vector<Edge> eList) {
+        int n = vList.size();
+        final int INF = 1_000_000_000;
+        int[][] dist = new int[n][n];
+        for (int i = 0; i < n; i++) {
+            Arrays.fill(dist[i], INF);
+            dist[i][i] = 0;
+        }
+        for (Edge e : eList) {
+            int u = vList.indexOf(e.vertex1);
+            int v = vList.indexOf(e.vertex2);
+            if (u < 0 || v < 0) continue;
+            dist[u][v] = Math.min(dist[u][v], e.weight);
+            if (!e.isDirected) dist[v][u] = Math.min(dist[v][u], e.weight);
+        }
+
+        for (int k = 0; k < n; k++) {
+            for (int i = 0; i < n; i++) {
+                if (dist[i][k] == INF) continue;
+                for (int j = 0; j < n; j++) {
+                    if (dist[k][j] == INF) continue;
+                    int nd = dist[i][k] + dist[k][j];
+                    if (nd < dist[i][j]) dist[i][j] = nd;
+                }
+            }
+        }
+        this.distanceMatrix = dist;
+        this.distanceMatrixTitle = "All-Pairs Shortest Paths (Floyd-Warshall)";
+        return dist;
     }
 
     // New: weighted, direction-aware shortest paths using Dijkstra from each source
@@ -194,7 +312,7 @@ public class GraphProperties {
         g.setColor(Color.LIGHT_GRAY);
         g.fillRect(x, y-30, vList.size() * cSize+cSize, vList.size() * cSize+cSize);
         g.setColor(Color.black);
-        g.drawString("ShortestPathMatrix", x, y - cSize);
+        g.drawString(distanceMatrixTitle, x, y - cSize);
         for (int i = 0; i < vList.size(); i++) {
             g.setColor(Color.RED);
             g.drawString(vList.get(i).name, x + cSize + i * cSize, y);
