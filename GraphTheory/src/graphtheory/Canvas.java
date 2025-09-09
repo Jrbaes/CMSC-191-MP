@@ -160,9 +160,14 @@ public class Canvas {
             toolBar.add(button);
         }
 
+        // Make the tools area scrollable while staying locked to the left
+        JScrollPane toolScroll = new JScrollPane(toolBar, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED, JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        toolScroll.setBorder(BorderFactory.createEmptyBorder());
+        toolScroll.getVerticalScrollBar().setUnitIncrement(16);
+
         JPanel toolPanel = new JPanel(new BorderLayout());
         toolPanel.setBorder(BorderFactory.createLineBorder(Color.BLACK, 2));
-        toolPanel.add(toolBar, BorderLayout.CENTER);
+        toolPanel.add(toolScroll, BorderLayout.CENTER);
         toolPanel.setPreferredSize(new Dimension(TOOLBAR_BUTTON_WIDTH + 20, height));
         // Do not add directly to frame; we'll assemble a root panel below
 
@@ -180,7 +185,7 @@ public class Canvas {
 
         menuBar = new JMenuBar();
         JMenu menuOptions1 = new JMenu("File");
-        JMenu menuOptions3 = new JMenu("Window");
+        // Window menu removed per user request
 
         JMenuItem item = new JMenuItem("Open File");
         item.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_O, KeyEvent.CTRL_DOWN_MASK));
@@ -194,18 +199,7 @@ public class Canvas {
         item.addActionListener(new MenuListener());
         menuOptions1.add(item);
 
-        item = new JMenuItem("Graph");
-        item.addActionListener(new MenuListener());
-        menuOptions3.add(item);
-        item = new JMenuItem("Properties");
-        item.addActionListener(new MenuListener());
-        menuOptions3.add(item);
-        item = new JMenuItem("Maximize Window");
-        item.addActionListener(new MenuListener());
-        menuOptions3.add(item);
-
         menuBar.add(menuOptions1);
-        menuBar.add(menuOptions3);
 
         frame.setJMenuBar(menuBar);
 
