@@ -1138,23 +1138,32 @@ public class Canvas {
 
             // Draw weight label if enabled; offset when both directions exist
             if (weightsEnabled && e.vertex1 != null && e.vertex2 != null) {
-                int x1 = e.vertex1.location.x, y1 = e.vertex1.location.y;
-                int x2 = e.vertex2.location.x, y2 = e.vertex2.location.y;
-                int mx = (x1 + x2) / 2;
-                int my = (y1 + y2) / 2;
                 Color prev = g2.getColor();
                 g2.setColor(darkMode ? Color.WHITE : Color.BLACK);
-                if (directionalityEnabled && e.isDirected && hasOpposite) {
-                    double dx = x2 - x1, dy = y2 - y1;
-                    double ang = Math.atan2(dy, dx);
-                    double nx = -Math.sin(ang), ny = Math.cos(ang);
-                    int side = +1; // clockwise side relative to direction v1->v2
-                    int off = 10;
-                    int lx = mx + (int)Math.round(side * off * nx);
-                    int ly = my + (int)Math.round(side * off * ny);
-                    g2.drawString(Integer.toString(e.weight), lx + 6, ly - 6);
+                
+                if (e.vertex1 == e.vertex2) {
+                    // Self-loop: draw weight above the loop
+                    int x = e.vertex1.location.x;
+                    int y = e.vertex1.location.y - 45; // Above the self-loop circle
+                    g2.drawString(Integer.toString(e.weight), x + 6, y - 6);
                 } else {
-                    g2.drawString(Integer.toString(e.weight), mx + 6, my - 6);
+                    // Regular edge
+                    int x1 = e.vertex1.location.x, y1 = e.vertex1.location.y;
+                    int x2 = e.vertex2.location.x, y2 = e.vertex2.location.y;
+                    int mx = (x1 + x2) / 2;
+                    int my = (y1 + y2) / 2;
+                    if (directionalityEnabled && e.isDirected && hasOpposite) {
+                        double dx = x2 - x1, dy = y2 - y1;
+                        double ang = Math.atan2(dy, dx);
+                        double nx = -Math.sin(ang), ny = Math.cos(ang);
+                        int side = +1; // clockwise side relative to direction v1->v2
+                        int off = 10;
+                        int lx = mx + (int)Math.round(side * off * nx);
+                        int ly = my + (int)Math.round(side * off * ny);
+                        g2.drawString(Integer.toString(e.weight), lx + 6, ly - 6);
+                    } else {
+                        g2.drawString(Integer.toString(e.weight), mx + 6, my - 6);
+                    }
                 }
                 g2.setColor(prev);
             }
@@ -1661,26 +1670,26 @@ public class Canvas {
             adjTable.getTableHeader().setReorderingAllowed(false);
             adjScroll.setViewportView(adjTable);
 
-            // Build weight table with row label column
-            WTableModel wModel = new WTableModel(0, 0);
-            wModel.setColumnIdentifiers(cols);
-            wModel.setRowCount(n);
-            for (int r = 0; r < n; r++) {
-                wModel.setValueAt(names.get(r), r, 0);
-                for (int c = 1; c <= n; c++) wModel.setValueAt(Integer.valueOf(0), r, c);
-            }
+                // Build weight table with row label column
+                WTableModel wModel = new WTableModel(0, 0);
+                wModel.setColumnIdentifiers(cols);
+                wModel.setRowCount(n);
+                for (int r = 0; r < n; r++) {
+                    wModel.setValueAt(names.get(r), r, 0);
+                    for (int c = 1; c <= n; c++) wModel.setValueAt("", r, c); // Start with blank, not 0
+                }
             weightTable.setModel(wModel);
             weightTable.getTableHeader().setReorderingAllowed(false);
             weightScroll.setViewportView(weightTable);
 
-            // Listeners: when undirected, mirror adjacency and weights; default weight=1 when adjacency set true, 0 when false
-            model.addTableModelListener(e2 -> {
-                if (e2.getColumn() <= 0 || e2.getFirstRow() < 0) return;
-                int r = e2.getFirstRow(); int c = e2.getColumn(); // c = 1..n
-                boolean val = Boolean.TRUE.equals(model.getValueAt(r, c));
-                // default weight updates
-                if (val && Integer.valueOf(0).equals(wModel.getValueAt(r, c))) wModel.setValueAt(Integer.valueOf(1), r, c);
-                if (!val) wModel.setValueAt(Integer.valueOf(0), r, c);
+                // Listeners: when undirected, mirror adjacency and weights; default weight=1 when adjacency set true, blank when false
+                model.addTableModelListener(e2 -> {
+                    if (e2.getColumn() <= 0 || e2.getFirstRow() < 0) return;
+                    int r = e2.getFirstRow(); int c = e2.getColumn(); // c = 1..n
+                    boolean val = Boolean.TRUE.equals(model.getValueAt(r, c));
+                    // default weight updates
+                    if (val && "".equals(String.valueOf(wModel.getValueAt(r, c)))) wModel.setValueAt(Integer.valueOf(1), r, c);
+                    if (!val) wModel.setValueAt("", r, c);
                 if (!chkDirected.isSelected()) {
                     // mirror symmetric
                     int mr = c - 1; int mc = r + 1;
@@ -1690,9 +1699,9 @@ public class Canvas {
                         if (val) {
                             Object wv = wModel.getValueAt(r, c);
                             if (!String.valueOf(wv).equals(String.valueOf(wModel.getValueAt(mr, mc)))) wModel.setValueAt(wv, mr, mc);
-                        } else {
-                            wModel.setValueAt(Integer.valueOf(0), mr, mc);
-                        }
+                            } else {
+                                wModel.setValueAt("", mr, mc);
+                            }
                     }
                 }
             });
@@ -1801,7 +1810,10 @@ public class Canvas {
                                 int w = 1;
                                 if (withWeights) {
                                     Object wv = weightTable.getValueAt(i, j+1);
-                                    try { w = Integer.parseInt(String.valueOf(wv)); } catch (Exception ex) { w = 1; }
+                                    String wvStr = String.valueOf(wv).trim();
+                                    if (!wvStr.isEmpty()) {
+                                        try { w = Integer.parseInt(wvStr); } catch (Exception ex) { w = 1; }
+                                    }
                                 }
                                 e.weight = w;
                                 edgeList.add(e);
@@ -1810,14 +1822,18 @@ public class Canvas {
                         } else if (presentPair) {
                             Edge e = new Edge(vertexList.get(i), vertexList.get(j));
                             e.isDirected = false;
-                            int w = 1;
-                            if (withWeights) {
-                                Object w1 = weightTable.getValueAt(i, j+1);
-                                Object w2 = weightTable.getValueAt(j, i+1);
-                                try { w = Integer.parseInt(String.valueOf(w1)); } catch (Exception ex) {
-                                    try { w = Integer.parseInt(String.valueOf(w2)); } catch (Exception ex2) { w = 1; }
+                                int w = 1;
+                                if (withWeights) {
+                                    Object w1 = weightTable.getValueAt(i, j+1);
+                                    Object w2 = weightTable.getValueAt(j, i+1);
+                                    String w1Str = String.valueOf(w1).trim();
+                                    String w2Str = String.valueOf(w2).trim();
+                                    if (!w1Str.isEmpty()) {
+                                        try { w = Integer.parseInt(w1Str); } catch (Exception ex) { w = 1; }
+                                    } else if (!w2Str.isEmpty()) {
+                                        try { w = Integer.parseInt(w2Str); } catch (Exception ex) { w = 1; }
+                                    }
                                 }
-                            }
                             e.weight = w;
                             edgeList.add(e);
                             vertexList.get(i).addVertex(vertexList.get(j));
@@ -1833,11 +1849,14 @@ public class Canvas {
                         if (selected) {
                             Edge e = new Edge(vertexList.get(i), vertexList.get(j));
                             e.isDirected = true;
-                            int w = 1;
-                            if (withWeights) {
-                                Object wv = weightTable.getValueAt(i, j+1);
-                                try { w = Integer.parseInt(String.valueOf(wv)); } catch (Exception ex) { w = 1; }
-                            }
+                                int w = 1;
+                                if (withWeights) {
+                                    Object wv = weightTable.getValueAt(i, j+1);
+                                    String wvStr = String.valueOf(wv).trim();
+                                    if (!wvStr.isEmpty()) {
+                                        try { w = Integer.parseInt(wvStr); } catch (Exception ex) { w = 1; }
+                                    }
+                                }
                             e.weight = w;
                             edgeList.add(e);
                             vertexList.get(i).addVertex(vertexList.get(j));
