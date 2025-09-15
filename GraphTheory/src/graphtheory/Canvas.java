@@ -1637,7 +1637,7 @@ public class Canvas {
         }
         class WTableModel extends DefaultTableModel {
             WTableModel(int rows, int cols) { super(rows, cols); }
-            @Override public Class<?> getColumnClass(int columnIndex) { return columnIndex == 0 ? String.class : Integer.class; }
+            @Override public Class<?> getColumnClass(int columnIndex) { return String.class; }
             @Override public boolean isCellEditable(int row, int column) { return column > 0; }
         }
 
