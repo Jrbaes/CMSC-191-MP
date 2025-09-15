@@ -1584,11 +1584,14 @@ public class Canvas {
         JButton buildBtn = new JButton("Build Matrix");
         top.add(buildBtn, BorderLayout.SOUTH);
 
-        JPanel center = new JPanel(new GridLayout(1,1));
+        JPanel center = new JPanel(new BorderLayout());
         center.setBorder(BorderFactory.createTitledBorder("Adjacency Matrix"));
         JTable adjTable = new JTable();
         JScrollPane adjScroll = new JScrollPane(adjTable);
-        center.add(adjScroll);
+        JLabel dirNote = new JLabel(" ");
+        dirNote.setBorder(BorderFactory.createEmptyBorder(4,4,4,4));
+        center.add(adjScroll, BorderLayout.CENTER);
+        center.add(dirNote, BorderLayout.SOUTH);
 
         JPanel south = new JPanel();
         south.setLayout(new BoxLayout(south, BoxLayout.Y_AXIS));
@@ -1618,16 +1621,15 @@ public class Canvas {
 
         final int[] nHolder = new int[]{0};
 
-        class BooleanTableModel extends DefaultTableModel {
-            BooleanTableModel(int rows, int cols) { super(rows, cols); }
-            @Override public Class<?> getColumnClass(int columnIndex) { return Boolean.class; }
-            @Override public boolean isCellEditable(int row, int column) { return true; }
+        class AdjTableModel extends DefaultTableModel {
+            AdjTableModel(int rows, int cols) { super(rows, cols); }
+            @Override public Class<?> getColumnClass(int columnIndex) { return columnIndex == 0 ? String.class : Boolean.class; }
+            @Override public boolean isCellEditable(int row, int column) { return column > 0; }
         }
-
-        class IntegerTableModel extends DefaultTableModel {
-            IntegerTableModel(int rows, int cols) { super(rows, cols); }
-            @Override public Class<?> getColumnClass(int columnIndex) { return Integer.class; }
-            @Override public boolean isCellEditable(int row, int column) { return true; }
+        class WTableModel extends DefaultTableModel {
+            WTableModel(int rows, int cols) { super(rows, cols); }
+            @Override public Class<?> getColumnClass(int columnIndex) { return columnIndex == 0 ? String.class : Integer.class; }
+            @Override public boolean isCellEditable(int row, int column) { return column > 0; }
         }
 
         buildBtn.addActionListener(ev -> {
@@ -1643,35 +1645,86 @@ public class Canvas {
             }
             int n = names.size();
             nHolder[0] = n;
-            Object[] headers = names.toArray(new Object[0]);
-            BooleanTableModel model = new BooleanTableModel(0, 0);
-            model.setColumnIdentifiers(headers);
+
+            // Build adjacency model with row label column
+            AdjTableModel model = new AdjTableModel(0, 0);
+            java.util.Vector<String> cols = new java.util.Vector<>();
+            cols.add("Vertex");
+            for (String nm : names) cols.add(nm);
+            model.setColumnIdentifiers(cols);
             model.setRowCount(n);
             for (int r = 0; r < n; r++) {
-                for (int c = 0; c < n; c++) {
-                    model.setValueAt(Boolean.FALSE, r, c);
-                }
+                model.setValueAt(names.get(r), r, 0);
+                for (int c = 1; c <= n; c++) model.setValueAt(Boolean.FALSE, r, c);
             }
             adjTable.setModel(model);
             adjTable.getTableHeader().setReorderingAllowed(false);
-            adjTable.getTableHeader().repaint();
             adjScroll.setViewportView(adjTable);
 
-            // Build default weight table too
-            IntegerTableModel wModel = new IntegerTableModel(0, 0);
-            wModel.setColumnIdentifiers(headers);
+            // Build weight table with row label column
+            WTableModel wModel = new WTableModel(0, 0);
+            wModel.setColumnIdentifiers(cols);
             wModel.setRowCount(n);
             for (int r = 0; r < n; r++) {
-                for (int c = 0; c < n; c++) {
-                    wModel.setValueAt(Integer.valueOf(1), r, c);
-                }
+                wModel.setValueAt(names.get(r), r, 0);
+                for (int c = 1; c <= n; c++) wModel.setValueAt(Integer.valueOf(0), r, c);
             }
             weightTable.setModel(wModel);
             weightTable.getTableHeader().setReorderingAllowed(false);
-            weightTable.getTableHeader().repaint();
             weightScroll.setViewportView(weightTable);
+
+            // Listeners: when undirected, mirror adjacency and weights; default weight=1 when adjacency set true, 0 when false
+            model.addTableModelListener(e2 -> {
+                if (e2.getColumn() <= 0 || e2.getFirstRow() < 0) return;
+                int r = e2.getFirstRow(); int c = e2.getColumn(); // c = 1..n
+                boolean val = Boolean.TRUE.equals(model.getValueAt(r, c));
+                // default weight updates
+                if (val && Integer.valueOf(0).equals(wModel.getValueAt(r, c))) wModel.setValueAt(Integer.valueOf(1), r, c);
+                if (!val) wModel.setValueAt(Integer.valueOf(0), r, c);
+                if (!chkDirected.isSelected()) {
+                    // mirror symmetric
+                    int mr = c - 1; int mc = r + 1;
+                    if (mr >= 0 && mr < n && mc >= 1 && mc <= n) {
+                        if (!Boolean.valueOf(val).equals(model.getValueAt(mr, mc))) model.setValueAt(val, mr, mc);
+                        // mirror weights when edge exists
+                        if (val) {
+                            Object wv = wModel.getValueAt(r, c);
+                            if (!String.valueOf(wv).equals(String.valueOf(wModel.getValueAt(mr, mc)))) wModel.setValueAt(wv, mr, mc);
+                        } else {
+                            wModel.setValueAt(Integer.valueOf(0), mr, mc);
+                        }
+                    }
+                }
+            });
+            // Mirror weight edits for undirected if both sides are edges
+            weightTable.getModel().addTableModelListener(e3 -> {
+                if (e3.getColumn() <= 0 || e3.getFirstRow() < 0) return;
+                if (chkDirected.isSelected()) return;
+                int r = e3.getFirstRow(); int c = e3.getColumn();
+                boolean edge = Boolean.TRUE.equals(model.getValueAt(r, c));
+                if (!edge) return;
+                int mr = c - 1; int mc = r + 1;
+                if (mr >= 0 && mr < n && mc >= 1 && mc <= n) {
+                    if (Boolean.TRUE.equals(model.getValueAt(mr, mc))) {
+                        Object wv = weightTable.getModel().getValueAt(r, c);
+                        if (!String.valueOf(wv).equals(String.valueOf(weightTable.getModel().getValueAt(mr, mc)))) {
+                            weightTable.getModel().setValueAt(wv, mr, mc);
+                        }
+                    }
+                }
+            });
+
+            // Direction note
+            if (chkDirected.isSelected()) {
+                dirNote.setText("Columns = origin, Rows = destination.");
+            } else {
+                dirNote.setText("Undirected: cells (i,j) and (j,i) mirror; weights mirror too.");
+            }
         });
 
+        chkDirected.addActionListener(ev -> {
+            dirNote.setText(chkDirected.isSelected() ? "Columns = origin, Rows = destination." : "Undirected: cells (i,j) and (j,i) mirror; weights mirror too.");
+        });
         chkWeights.addActionListener(ev -> weightPanel.setVisible(chkWeights.isSelected()));
         cancel.addActionListener(ev -> dlg.dispose());
 
@@ -1705,43 +1758,90 @@ public class Canvas {
             boolean directed = chkDirected.isSelected();
             boolean withWeights = chkWeights.isSelected();
 
-            // Build edges from adjacency
-            for (int i = 0; i < n; i++) {
-                for (int j = 0; j < n; j++) {
-                    boolean present = Boolean.TRUE.equals(adjTable.getValueAt(i, j));
-                    if (!directed) {
-                        if (i < j) {
-                            boolean presentPair = present || Boolean.TRUE.equals(adjTable.getValueAt(j, i));
-                            if (presentPair) {
+            // If directed, allow per-edge direction selection via checkboxes initialized from adjacency matrix
+            java.util.Map<String, JCheckBox> dirBoxes = new java.util.HashMap<>();
+            if (directed) {
+                JPanel dirPanel = new JPanel();
+                dirPanel.setLayout(new BoxLayout(dirPanel, BoxLayout.Y_AXIS));
+                dirPanel.setBorder(BorderFactory.createTitledBorder("Select Directions per Edge"));
+                for (int i = 0; i < n; i++) {
+                    for (int j = i; j < n; j++) {
+                        boolean aToB = Boolean.TRUE.equals(adjTable.getValueAt(i, j+1));
+                        boolean bToA = (i == j) ? false : Boolean.TRUE.equals(adjTable.getValueAt(j, i+1));
+                        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT));
+                        if (i == j) {
+                            JCheckBox aa = new JCheckBox(names.get(i) + " -> " + names.get(j), aToB);
+                            dirBoxes.put(i + "," + j, aa);
+                            row.add(aa);
+                        } else {
+                            JCheckBox ab = new JCheckBox(names.get(i) + " -> " + names.get(j), aToB);
+                            JCheckBox ba = new JCheckBox(names.get(j) + " -> " + names.get(i), bToA);
+                            dirBoxes.put(i + "," + j, ab);
+                            dirBoxes.put(j + "," + i, ba);
+                            row.add(ab);
+                            row.add(ba);
+                        }
+                        dirPanel.add(row);
+                    }
+                }
+                int res = JOptionPane.showConfirmDialog(dlg, new JScrollPane(dirPanel), "Edge Directions", JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+                if (res != JOptionPane.OK_OPTION) return;
+            }
+
+            // Build edges based on selections
+            if (!directed) {
+                for (int i = 0; i < n; i++) {
+                    for (int j = i; j < n; j++) {
+                        boolean present = Boolean.TRUE.equals(adjTable.getValueAt(i, j+1));
+                        boolean presentPair = present || (j != i && Boolean.TRUE.equals(adjTable.getValueAt(j, i+1)));
+                        if (i == j) {
+                            if (present) {
                                 Edge e = new Edge(vertexList.get(i), vertexList.get(j));
                                 e.isDirected = false;
+                                int w = 1;
                                 if (withWeights) {
-                                    Object w1 = weightTable.getValueAt(i, j);
-                                    Object w2 = weightTable.getValueAt(j, i);
-                                    int w = 1;
-                                    try { w = Integer.parseInt(String.valueOf(w1)); } catch (Exception ex) {
-                                        try { w = Integer.parseInt(String.valueOf(w2)); } catch (Exception ex2) { w = 1; }
-                                    }
-                                    e.weight = w;
+                                    Object wv = weightTable.getValueAt(i, j+1);
+                                    try { w = Integer.parseInt(String.valueOf(wv)); } catch (Exception ex) { w = 1; }
                                 }
+                                e.weight = w;
                                 edgeList.add(e);
                                 vertexList.get(i).addVertex(vertexList.get(j));
-                                vertexList.get(j).addVertex(vertexList.get(i));
                             }
-                        }
-                    } else { // directed
-                        if (present && i != j) {
+                        } else if (presentPair) {
                             Edge e = new Edge(vertexList.get(i), vertexList.get(j));
-                            e.isDirected = true;
+                            e.isDirected = false;
+                            int w = 1;
                             if (withWeights) {
-                                Object w1 = weightTable.getValueAt(i, j);
-                                int w = 1;
-                                try { w = Integer.parseInt(String.valueOf(w1)); } catch (Exception ex) { w = 1; }
-                                e.weight = w;
+                                Object w1 = weightTable.getValueAt(i, j+1);
+                                Object w2 = weightTable.getValueAt(j, i+1);
+                                try { w = Integer.parseInt(String.valueOf(w1)); } catch (Exception ex) {
+                                    try { w = Integer.parseInt(String.valueOf(w2)); } catch (Exception ex2) { w = 1; }
+                                }
                             }
+                            e.weight = w;
                             edgeList.add(e);
                             vertexList.get(i).addVertex(vertexList.get(j));
                             vertexList.get(j).addVertex(vertexList.get(i));
+                        }
+                    }
+                }
+            } else { // directed
+                for (int i = 0; i < n; i++) {
+                    for (int j = 0; j < n; j++) {
+                        JCheckBox cb = dirBoxes.get(i + "," + j);
+                        boolean selected = cb != null && cb.isSelected();
+                        if (selected) {
+                            Edge e = new Edge(vertexList.get(i), vertexList.get(j));
+                            e.isDirected = true;
+                            int w = 1;
+                            if (withWeights) {
+                                Object wv = weightTable.getValueAt(i, j+1);
+                                try { w = Integer.parseInt(String.valueOf(wv)); } catch (Exception ex) { w = 1; }
+                            }
+                            e.weight = w;
+                            edgeList.add(e);
+                            vertexList.get(i).addVertex(vertexList.get(j));
+                            if (i != j) vertexList.get(j).addVertex(vertexList.get(i));
                         }
                     }
                 }

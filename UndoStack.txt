@@ -1,0 +1,13 @@
+===SNAP===
+UI
+directionalityEnabled=0
+weightsEnabled=0
+selectedTool=0
+zoom=1.0
+panX=0
+panY=0
+GRAPH
+0
+VERTEX_COLORS
+EDGES
+0
