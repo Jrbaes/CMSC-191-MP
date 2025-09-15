@@ -31,6 +31,12 @@ public class Edge {
     }
 
     public void draw(Graphics g) {
+        // Default: no offset
+        draw(g, 0, 0);
+    }
+
+    // offsetPx: perpendicular offset applied to the entire line; sideSign: -1,0,+1 for side selection
+    public void draw(Graphics g, int offsetPx, int sideSign) {
         if (wasClicked) {
             g.setColor(Color.red);
         } else if (wasFocused) {
@@ -43,17 +49,28 @@ public class Edge {
             int loopSize = 20;
             g.drawOval(vertex1.location.x - loopSize / 2, vertex1.location.y - 30, loopSize, loopSize);
         } else {
+            int x1 = vertex1.location.x, y1 = vertex1.location.y;
+            int x2 = vertex2.location.x, y2 = vertex2.location.y;
+            if (offsetPx != 0 && sideSign != 0) {
+                double dx = x2 - x1, dy = y2 - y1;
+                double ang = Math.atan2(dy, dx);
+                double nx = -Math.sin(ang), ny = Math.cos(ang);
+                x1 += (int) Math.round(sideSign * offsetPx * nx);
+                y1 += (int) Math.round(sideSign * offsetPx * ny);
+                x2 += (int) Math.round(sideSign * offsetPx * nx);
+                y2 += (int) Math.round(sideSign * offsetPx * ny);
+            }
             if (isDirected && g instanceof Graphics2D) {
                 Graphics2D g2 = (Graphics2D) g;
                 java.awt.Stroke old = g2.getStroke();
                 g2.setStroke(new BasicStroke(2.5f));
-                g2.drawLine(vertex1.location.x, vertex1.location.y, vertex2.location.x, vertex2.location.y);
+                g2.drawLine(x1, y1, x2, y2);
                 g2.setStroke(old);
             } else {
-                g.drawLine(vertex1.location.x, vertex1.location.y, vertex2.location.x, vertex2.location.y);
+                g.drawLine(x1, y1, x2, y2);
             }
             if (isDirected) {
-                drawArrow(g, vertex1.location.x, vertex1.location.y, vertex2.location.x, vertex2.location.y);
+                drawArrow(g, x1, y1, x2, y2);
             }
         }
 

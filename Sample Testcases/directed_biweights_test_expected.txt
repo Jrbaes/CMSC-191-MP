@@ -1,0 +1,21 @@
+Directed bi-weights test (3 vertices: A,B,C)
+Edges saved as directed entries with independent weights.
+Vertices:
+0:A (100,100)
+1:B (200,100)
+2:C (300,100)
+
+Edges (u->v, weight):
+0->1 (5)
+1->0 (2)
+1->2 (-3)
+
+Expectations:
+- After load: three directed edges as above.
+- Dijkstra Path (A->B) cost 5.
+- Dijkstra Path (B->A) cost 2.
+- Bellman-Ford Path (B->C) cost -3.
+- Bellman-Ford detects no negative cycle.
+- Clicking the line between A and B with Highlight Tool highlights BOTH directions.
+- Clicking the arrow head near B on edge A->B highlights ONLY A->B.
+- Remove Tool: line click removes BOTH directions between A and B; arrow click near B removes ONLY A->B.

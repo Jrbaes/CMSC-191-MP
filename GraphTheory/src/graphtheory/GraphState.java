@@ -1,12 +1,27 @@
 package graphtheory;
 
 import java.util.Vector;
+import java.awt.Color;
 
 public class GraphState {
     public Vector<Vertex> vertexList;
     public Vector<Edge> edgeList;
+    public boolean directionalityEnabled;
+    public boolean weightsEnabled;
+    public int selectedTool;
+    public double zoom;
+    public int panX, panY;
 
-    public GraphState(Vector<Vertex> vertexList, Vector<Edge> edgeList) {
+    public GraphState(Vector<Vertex> vertexList, Vector<Edge> edgeList, 
+                     boolean directionalityEnabled, boolean weightsEnabled, 
+                     int selectedTool, double zoom, int panX, int panY) {
+        this.directionalityEnabled = directionalityEnabled;
+        this.weightsEnabled = weightsEnabled;
+        this.selectedTool = selectedTool;
+        this.zoom = zoom;
+        this.panX = panX;
+        this.panY = panY;
+        
         this.vertexList = new Vector<>();
         for (Vertex v : vertexList) {
             this.vertexList.add(cloneVertex(v));
@@ -15,7 +30,7 @@ public class GraphState {
         // After all vertices are cloned, establish their connections
         for (int i = 0; i < vertexList.size(); i++) {
             Vertex originalVertex = vertexList.get(i);
-            Vertex clonedVertex = this.vertexList.get(i); // Assumes order is preserved
+            Vertex clonedVertex = this.vertexList.get(i);
             for (Vertex connected : originalVertex.connectedVertices) {
                 Vertex clonedConnected = findClonedVertex(connected, this.vertexList);
                 if (clonedConnected != null) {
