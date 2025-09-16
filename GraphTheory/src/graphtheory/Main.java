@@ -13,5 +13,4 @@ public class Main {
         new Canvas("Diadikt.io", 800, 600, Color.WHITE);
 
     }
-    // To fix: Invert directionality, enable diretionality, undo, redo, GUI, edge weights
 }
